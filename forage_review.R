@@ -1,8 +1,6 @@
 library(shiny)
 library(shinydashboard)
-#library(V8)
-##tx <- v8()
-#ctx$source()
+
 
 forage_make_sidebar <- function(x, input) {
   purrr::imap(
