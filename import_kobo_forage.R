@@ -90,10 +90,10 @@ existing_UUIDs <-
 
 # Forage onfarm form is "axnBDev39ubd4UJtqhk2yX"
 #   Found via visual inspection
-forage_submissions_response <- GET(
-  url = "https://kf.kobotoolbox.org/api/v2/assets/axnBDev39ubd4UJtqhk2yX/data",
-  add_headers("Authorization" = kobo_token)
-)
+# forage_submissions_response <- GET(
+#   url = "https://kf.kobotoolbox.org/api/v2/assets/axnBDev39ubd4UJtqhk2yX/data",
+#   add_headers("Authorization" = kobo_token)
+# )
 
 forage_submissions_response_list <- 
   purrr::map(
@@ -116,12 +116,20 @@ forage_submissions <-
 
 # Function definitions: ----
 forage_extract_metadata <- function(elt) {
-  #proj = elt[["experiment"]] %||% "onfarm"
-  # TODO coalescing not working with NA or character(0)
-  proj = elt[["experiment"]] %||% str_extract(elt[["form_name"]], "onfarm$|ce1$|ce2$") %||% "onfarm"
+  
+  sub_time = lubridate::ymd_hms(elt[["_submission_time"]])
+  if (sub_time < lubridate::ymd_hms("2021-12-31 00:00:00")) {
+    stop("Very old form version, _uuid: ", elt[["_uuid"]])
+  }
+  
+  proj = elt[["experiment"]] %||% str_extract(elt[["form_name"]], "onfarm$|ce1$|ce2$") 
+  if (!(proj %in% c("onfarm", "ce1", "ce2"))) {
+    proj = "onfarm"
+  }
+  
   scan_date = (elt[["date"]] %||% elt[["today"]]) %>% str_remove_all("-")
   uuid = elt[["_uuid"]]
-  timing = elt[["time"]] %||% "biomass"
+  timing = elt[["time"]] %||% "biomass" #TODO error if not onfarm, called "timing" for CE1
 
   location = 
     (elt[["code"]] %||% elt[["ce1"]] %||% elt[["ce2"]] %||% "") %>% 
@@ -200,20 +208,23 @@ raw_forms_urls <- purrr::map(
   purrr::safely(forage_extract_urls)
 )
 
+raw_forms_urls %>% purrr::map("result")
+
 forage_extract_data <- function(elt) {
-  v <- elt[["__version__"]]
-  f <- case_when(
-    v == "vs5DePTxmUxkL5pQrzx5hd" ~ forage_extract_data_2022,
-    v == "vg6gRM9XuDVyCmgFqF7f4b" ~ forage_extract_data_2022,
-    v == "v99aTCmLkehhLMXExdD6Yi" ~ forage_extract_data_2022,
-    v == "vtPieLBJh95pFM7T6CFQdn" ~ forage_extract_data_2022,
-    v == "vDrzDaJHEW6bNJobTLcjqi" ~ forage_extract_data_2023,
-    v == "vD4CFku8m7exZDidRGtzdW" ~ forage_extract_data_2023,
-    v == "v5gRvjhRAGtyuJaredYtSe" ~ forage_extract_data_2023_ce1,
-    v == "vDMCUQLU8rgUzdALXfnwes" ~ forage_extract_data_2023,
-    v == "vkYzYnhqFb2EyyauMUVMxh" ~ forage_extract_data_2023_ce2
+
+  f <- switch(
+    elt[["__version__"]],
+    "vs5DePTxmUxkL5pQrzx5hd" = forage_extract_data_2022,
+    "vg6gRM9XuDVyCmgFqF7f4b" = forage_extract_data_2022,
+    "v99aTCmLkehhLMXExdD6Yi" = forage_extract_data_2022,
+    "vtPieLBJh95pFM7T6CFQdn" = forage_extract_data_2022,
+    "vDrzDaJHEW6bNJobTLcjqi" = forage_extract_data_2023_onfarm,
+    "vD4CFku8m7exZDidRGtzdW" = forage_extract_data_2023_onfarm,
+    "v5gRvjhRAGtyuJaredYtSe" = forage_extract_data_2023_ce1,
+    "vDMCUQLU8rgUzdALXfnwes" = forage_extract_data_2023_ce2,
+    "vkYzYnhqFb2EyyauMUVMxh" = forage_extract_data_2023_ce2
   )
-  
+
   f(elt)
 }
 
@@ -263,7 +274,45 @@ forage_extract_data_2022 <- function(elt) {
 }
 
 forage_extract_data_2023_onfarm <- function(elt) {
+  nms <- c(
+    "cover_crop_image_rep1", "cover_crop_image_rep2", 
+    "bare_rep1", "bare_rep2",
+    "file1", "file2"
+  )
   
+  ret <- elt[nms] %>% 
+    purrr::compact() %>% 
+    tibble::enframe("field", "filename") %>% 
+    tidyr::unnest(filename) %>% 
+    mutate(
+      id_code = paste0("rep", str_extract(field, "[1-4]")),
+      species = str_extract(field, "cover|rye|legume|mix"),
+      species = replace(species, is.na(species), "all"),
+      ext = str_to_lower(str_extract(filename, "jpg|JPG|csv|CSV")),
+      type = case_when(
+        ext == "jpg" ~ "I",
+        ext == "csv" ~ "S",
+        T ~ "U"
+      )
+    )
+  
+  if (!nrow(ret)) {
+    stop(
+      "No scan (CSV) or image (jpg) filenames detected: ", 
+      jsonlite::toJSON(list(uuid = elt[["_uuid"]])),
+      call. = F
+    )
+  }
+  
+  if (any(ret$type == "U")) {
+    stop(
+      "Unknown filetype: ", 
+      jsonlite::toJSON(ret %>% filter(type == "U")),
+      call. = F
+    )
+  }
+  
+  ret
 }
 
 forage_extract_data_2023_ce1 <- function(elt) {
@@ -271,7 +320,7 @@ forage_extract_data_2023_ce1 <- function(elt) {
   if (elt[["__version__"]] == "v5gRvjhRAGtyuJaredYtSe") {
     orig <- names(elt)
     orig[orig == "rep4_bare"] <- "rep3_bare"
-    orig[orig == "rep4_bare001"] <- "rep4_bare"
+    orig[orig == "rep4_bare_001"] <- "rep4_bare"
     names(elt) <- orig
   }
   
@@ -283,33 +332,40 @@ forage_extract_data_2023_ce1 <- function(elt) {
     "rep4_rye", "rep4_legume", "rep4_mix", "rep4_bare" 
   )
   
-  
   orders <- 
     elt[str_detect(names(elt), "rep[1-4]_walking_order[1-4]")] %>% 
     purrr::compact() %>% 
     tibble::enframe("field", "treatment") %>% 
     tidyr::unnest(treatment) %>% 
     mutate(
-      id_code = str_extract(field, "^rep[1-5]"),
-      order = str_extract(field, "[1-5]$"),
+      id_code = str_extract(field, "^rep[1-4]"),
+      order = str_extract(field, "[1-4]$"),
       treatment = str_replace_all(treatment, "_", "-")
     ) %>% 
     arrange(id_code, order) %>% 
     group_by(id_code) %>% 
     summarise(treatment = paste(treatment, collapse = "~"))
   
+  if (!length(elt[["timing"]])) {
+    stop("Missing treatment timing, UUID: ", elt[["_uuid"]])
+  }
+  
   photo_ids <- 
-    tibble(
-      treatment = elt[["time"]],
-      id_code = paste0("block", as.character(1:5))
-    )
+    expand.grid(
+      treatment = ifelse(elt[["timing"]] == "no", "early", "biomass"),
+      id_code = paste0("rep", as.character(1:4)),
+      species = c("rye", "legume", "mix", "bare")
+    ) %>% 
+    mutate(id_code = paste(id_code, species, sep = "_")) %>% 
+    select(-species)
+
   
   ret <- elt[nms] %>% 
     purrr::compact() %>% 
     tibble::enframe("field", "filename") %>% 
     tidyr::unnest(filename) %>% 
     mutate(
-      id_code = str_extract(field, "walk[A-D]$|block[1-5]"),
+      id_code = field,
       species = "rye",
       ext = str_to_lower(str_extract(filename, "jpg|JPG|csv|CSV")),
       type = case_when(
@@ -325,7 +381,7 @@ forage_extract_data_2023_ce1 <- function(elt) {
       bind_rows(orders, photo_ids),
       by = "id_code"
     ) %>% 
-    mutate(id_code = paste(id_code, treatment, sep = "~"))
+    mutate(id_code = paste(id_code, treatment, sep = "~")) 
   
   if (!nrow(ret)) {
     stop(
@@ -354,7 +410,7 @@ forage_extract_data_2023_ce2 <- function(elt) {
     "block4covercrop", "block4bare", 
     "block5covercrop", "block5bare"
   )
-  
+
   orders <- 
     elt[str_detect(names(elt), "walk[A-D]_walking_order[1-5]")] %>% 
     purrr::compact() %>% 
@@ -370,6 +426,10 @@ forage_extract_data_2023_ce2 <- function(elt) {
     group_by(id_code) %>% 
     summarise(treatment = paste(treatment, collapse = "~"))
 
+  if (!length(elt[["time"]])) {
+    stop("Missing treatment timing, UUID: ", elt[["_uuid"]])
+  }
+  
   photo_ids <- 
     expand.grid(
       treatment = elt[["time"]],
@@ -419,12 +479,15 @@ forage_extract_data_2023_ce2 <- function(elt) {
   }
   ret
 }
-
+# fix up UUID 271c5cba
 
 raw_forms_filenames <- purrr::map(
-  forage_submissions[71],
-  purrr::safely(forage_extract_data_2023_ce2)
+  forage_submissions,
+  ~purrr::safely(forage_extract_data)(.x)
 )
+
+raw_forms_filenames %>% purrr::map("result")
+raw_forms_filenames %>% purrr::map("error")
 
 forage_parse <- function(elt, pre_existing = "") {
   
@@ -433,20 +496,32 @@ forage_parse <- function(elt, pre_existing = "") {
     return(NULL)
   }
   
-  
-  if (elt[["__version__"]] != "vtPieLBJh95pFM7T6CFQdn") {
-    stop(
-      "Parsing not defined for version: ",
-      jsonlite::toJSON(elt[c("_uuid", "__version__")])
-    )
-  }
+  # valid_versions = c("vs5DePTxmUxkL5pQrzx5hd",
+  #                    "vg6gRM9XuDVyCmgFqF7f4b",
+  #                    "v99aTCmLkehhLMXExdD6Yi",
+  #                    "vtPieLBJh95pFM7T6CFQdn",
+  #                    "vDrzDaJHEW6bNJobTLcjqi",
+  #                    "vD4CFku8m7exZDidRGtzdW",
+  #                    "v5gRvjhRAGtyuJaredYtSe",
+  #                    "vDMCUQLU8rgUzdALXfnwes",
+  #                    "vkYzYnhqFb2EyyauMUVMxh")
+  # 
+  # if (elt[["__version__"]] != "vtPieLBJh95pFM7T6CFQdn") {
+  #   stop(
+  #     "Parsing not defined for version: ",
+  #     jsonlite::toJSON(elt[c("_uuid", "__version__")])
+  #   )
+  # }
   
   urls <- forage_extract_urls(elt)
   files <- forage_extract_data(elt)
   
+  # left_join needed here because there was a submission that
+  #   had a "ghost" attachment, site YLM. A CSV was attached
+  #   without being referred to in the form fields
   ret <- full_join(
     meta,
-    full_join(urls, files, by = "filename"),
+    left_join(files, urls, by = "filename"),
     by = character()
   )
   
@@ -462,14 +537,14 @@ forage_parse <- function(elt, pre_existing = "") {
 
 forage_download <- function(dl_url, file_nm) {
   if (!dir.exists("forage_blobs")) {
-    stop("There's no blob directory in: ", getwd())
+    stop("There's no `/forage_blobs` directory in: ", getwd())
   }
   
   message(file_nm)
   res <- RETRY(
     "GET",
     dl_url,
-    add_headers("Authorization" = sarah_token),
+    add_headers("Authorization" = kobo_token),
     write_disk(file.path("forage_blobs", file_nm), overwrite = T),
     progress()
   )
@@ -489,7 +564,8 @@ forage_download <- function(dl_url, file_nm) {
   ) {
     stop(
       "Incompatible sizes: response, ", 
-      res_size, "; local, ", local_size
+      res_size, "; local, ", local_size,
+      "; ", file_nm
       )
   }
   
@@ -540,7 +616,7 @@ forage_upload <- function(lcl_nm, cnt) {
 ## Execute: ----
 raw_forms_tibbles <- 
   purrr::map(
-    content(forage_submissions_response)$results,
+    forage_submissions,
     ~purrr::safely(forage_parse)(
       .x, 
       pre_existing = c(existing_UUIDs, known_bad_UUIDs)
@@ -574,7 +650,7 @@ raw_forms_local <-
 
 raw_forms_local_to_push <- 
   raw_forms_local %>% 
-  group_by(uuid) %>% ### ????
+  group_by(uuid) %>% 
   filter(
     purrr::map_lgl(
       local_fn, 
@@ -633,7 +709,8 @@ forms_to_check <-
       ),
     "Download attachments" =
       raw_forms_local_to_check %>% 
-      select(fn, uuid, err = local_fn),
+      mutate(local_fn = basename(local_fn)) %>% 
+      select(filename, uuid, err = local_fn),
     "Upload blobs" = 
       blobs_to_check %>% 
       tibble::enframe("uuid", "err") %>% 
