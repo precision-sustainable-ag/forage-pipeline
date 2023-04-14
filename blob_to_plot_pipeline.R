@@ -220,6 +220,13 @@ onfarm_loop_attempts %>%
   purrr::compact()
 
 plot_onfarm <- function(elt) {
+  readline("Hit Enter to continue:")
+  
+  message(
+      cli::col_green("File: "),
+      cli::col_blue(basename(elt$fn[1]))
+    )
+  
   bb <- elt %>% 
     filter(flag == 1) %>% 
     st_bbox() %>% 
@@ -239,7 +246,8 @@ plot_onfarm <- function(elt) {
       collapse = ""
     )
 
-  ggplot(elt, aes(color = as.factor(flag))) + 
+  print(
+    ggplot(elt, aes(color = as.factor(flag))) + 
     geom_sf(show.legend = F) +
     labs(
       title = paste0("Number of points: ", nrow(filter(elt, flag == 1))),
@@ -249,9 +257,10 @@ plot_onfarm <- function(elt) {
       location = loc,
       width_hint = 0.5
       )
+  )
 }
 
-purrr::map(
+purrr::walk(
   onfarm_loops,
   plot_onfarm
 )
@@ -311,3 +320,4 @@ ce1_plots <-
 #   width = 8, height = 8,
 #   device = "pdf"
 # )
+
