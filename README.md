@@ -22,8 +22,8 @@
     - tip-ups between plots in same-rep column of field block (CE2, #TODO)
  - Labels plots with proper IDs:
    - Onfarm: built in to filename
-   - CE1: order will be in the form, needs to be pulled in step 1, #TODO
-   - CE2: order will be in the form, needs to be pulled in step 1, #TODO
+   - CE1: built in to filename and column `plot_id`
+   - CE2:built in to filename and column `plot_id`
  - Upload labeled files to blob storage in next container, #TODO
 
 # Step 4:

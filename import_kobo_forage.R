@@ -53,18 +53,7 @@ known_bad_UUIDs <- c(
 # Authenticate: ----
 source("secret.R")
 # kobo_token, sas_endpoint, sas_token, this_env
-# sarah_token <- readr::read_lines("kobo_token.txt")
-# sas_token <- 
-#   readr::read_lines(
-#     "secret.R"
-#   ) %>% 
-#   purrr::set_names(stringr::word(.)) %>% 
-#   purrr::keep(~stringr::str_detect(.x, "^sas|^endpoint")) %>% 
-#   bind_rows() %>% 
-#   mutate_all(
-#     ~stringr::str_extract(., '".+"$') %>% 
-#       stringr::str_remove_all('"')
-#   )
+
   
 
 # Fetch: ----
@@ -129,7 +118,7 @@ forage_extract_metadata <- function(elt) {
   
   scan_date = (elt[["date"]] %||% elt[["today"]]) %>% str_remove_all("-")
   uuid = elt[["_uuid"]]
-  timing = elt[["time"]] %||% "biomass" #TODO error if not onfarm, called "timing" for CE1
+  timing = elt[["time"]] %||% elt[["timing"]] %||% "biomass" 
 
   location = 
     (elt[["code"]] %||% elt[["ce1"]] %||% elt[["ce2"]] %||% "") %>% 
@@ -168,10 +157,6 @@ forage_extract_metadata <- function(elt) {
   ret
 }
 
-# raw_forms_metadata <- purrr::map(
-#   content(forage_submissions_response)$results,
-#   purrr::safely(forage_extract_metadata)
-# )
 
 raw_forms_metadata <-
   purrr::map(
@@ -211,7 +196,14 @@ raw_forms_urls <- purrr::map(
 raw_forms_urls %>% purrr::map("result")
 
 forage_extract_data <- function(elt) {
-
+  err <- function(e) {
+    stop(
+      "No function yet for version: ",
+      e[["__version__"]],
+      "; UUID: ", e[["_uuid"]]
+      )
+  }
+  
   f <- switch(
     elt[["__version__"]],
     "vs5DePTxmUxkL5pQrzx5hd" = forage_extract_data_2022,
@@ -222,7 +214,8 @@ forage_extract_data <- function(elt) {
     "vD4CFku8m7exZDidRGtzdW" = forage_extract_data_2023_onfarm,
     "v5gRvjhRAGtyuJaredYtSe" = forage_extract_data_2023_ce1,
     "vDMCUQLU8rgUzdALXfnwes" = forage_extract_data_2023_ce2,
-    "vkYzYnhqFb2EyyauMUVMxh" = forage_extract_data_2023_ce2
+    "vkYzYnhqFb2EyyauMUVMxh" = forage_extract_data_2023_ce2,
+    err
   )
 
   f(elt)
@@ -496,22 +489,6 @@ forage_parse <- function(elt, pre_existing = "") {
     return(NULL)
   }
   
-  # valid_versions = c("vs5DePTxmUxkL5pQrzx5hd",
-  #                    "vg6gRM9XuDVyCmgFqF7f4b",
-  #                    "v99aTCmLkehhLMXExdD6Yi",
-  #                    "vtPieLBJh95pFM7T6CFQdn",
-  #                    "vDrzDaJHEW6bNJobTLcjqi",
-  #                    "vD4CFku8m7exZDidRGtzdW",
-  #                    "v5gRvjhRAGtyuJaredYtSe",
-  #                    "vDMCUQLU8rgUzdALXfnwes",
-  #                    "vkYzYnhqFb2EyyauMUVMxh")
-  # 
-  # if (elt[["__version__"]] != "vtPieLBJh95pFM7T6CFQdn") {
-  #   stop(
-  #     "Parsing not defined for version: ",
-  #     jsonlite::toJSON(elt[c("_uuid", "__version__")])
-  #   )
-  # }
   
   urls <- forage_extract_urls(elt)
   files <- forage_extract_data(elt)
