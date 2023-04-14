@@ -11,6 +11,19 @@ hex_rx <- function(...) {
 
 uuid_rx <- hex_rx(8, 4, 4, 4, 12)  
 
+make_square <- function(obj) {
+  b <- st_bbox(obj)
+  m <- max(b["xmax"] - b["xmin"], b["ymax"] - b["ymin"])
+  
+  cx <- (b["xmax"] + b["xmin"])/2
+  cy <- (b["ymax"] + b["ymin"])/2
+  
+  b["xmin"] <- cx - m/2
+  b["xmax"] <- cx + m/2
+  b["ymin"] <- cy - m/2
+  b["ymax"] <- cy + m/2
+  b
+}
 
 # Authenticate: ----
 source("secret.R")
@@ -98,6 +111,19 @@ parse_box_from_dict <- function(fn) {
     
     addr_pos <- 10
     
+  } else if (sensor_type == "PHENOM_ACS435" & !has_voltage) {
+    hdr <- 
+      list(
+        c("LAT", "LNG", "COURSE", "SPEED", "ELEV", "HDOP", "FIX",
+          "UTC_DATE", "UTC_TIME", "SENSOR_ADDR", 
+          "NDVI", "3DNDVI", "NIR", "R"), # SENSOR_TYPE:PHENOM_ACS435
+        c("LAT", "LNG", "COURSE", "SPEED", "ELEV", "HDOP", "FIX",
+          "UTC_DATE", "UTC_TIME", "SENSOR_ADDR",
+          "SONAR", "LIDAR", "ISP1", "ISP2") # SENSOR_TYPE:PHENOM_DAS44X
+      )
+    
+    addr_pos <- 10
+    
   } else {
     stop("Unknown sensor type: ", fn)
   }
@@ -142,6 +168,12 @@ scans <- dir(
   )
 
 purrr::map(scans, "error") %>% purrr::compact()
+
+purrr::map(scans, "error") %>% 
+  purrr::compact() %>% 
+  purrr::map("message") %>% 
+  purrr::map_chr(~str_extract(.x, "forage_.+$")) %>% 
+  purrr::map(~readr::read_lines(.x, n_max = 5))
 
 # _Onfarm: ----
 extract_loop <- function(trk) {
@@ -227,6 +259,7 @@ plot_onfarm <- function(elt) {
       cli::col_blue(basename(elt$fn[1]))
     )
   
+  sq <- make_square(elt) %>% st_as_sfc()
   bb <- elt %>% 
     filter(flag == 1) %>% 
     st_bbox() %>% 
@@ -248,14 +281,15 @@ plot_onfarm <- function(elt) {
 
   print(
     ggplot(elt, aes(color = as.factor(flag))) + 
-    geom_sf(show.legend = F) +
-    labs(
-      title = paste0("Number of points: ", nrow(filter(elt, flag == 1))),
-      subtitle = paste0("Area of bbox: ", format(st_area(bb)))
+      geom_sf(data = sq, color = NA, fill = NA) +
+      geom_sf(show.legend = F) +
+      labs(
+        title = paste0("Number of points: ", nrow(filter(elt, flag == 1))),
+        subtitle = paste0("Area of bbox: ", format(st_area(bb)))
       ) +
-    ggspatial::annotation_scale(
-      location = loc,
-      width_hint = 0.5
+      ggspatial::annotation_scale(
+        location = loc,
+        width_hint = 0.5
       )
   )
 }
@@ -277,17 +311,131 @@ runs_to_plots <- function(flag, n) {
   inverse.rle(x)
 }
 
+extract_ce_plots <- function(dat, n_plots) {
+  meta <- basename(dat$fn[1]) %>% 
+    str_remove("\\.csv$") %>% 
+    str_split("_", simplify = T) %>% 
+    set_names(
+      c("boxtype", "proj", "location", "timing", "species",
+        "walk_order", "scan", "scan_date", "uuid")
+    )
+
+  walk_order <- 
+    tibble(
+      plot_id = c(
+        "alley",
+        meta[["walk_order"]] %>% 
+        str_split("~", simplify = T) %>% 
+        as.vector()
+      )
+    ) %>% 
+    slice(-2) %>%             # remove "rep" or "walk"
+    mutate(
+      flag = row_number() - 1 # index "alley" at 0
+    )
+  
+  
+  ret <- dat %>% 
+    mutate(
+      flag = RcppRoll::roll_max(LIDAR, 10, fill = NA),
+      flag = runs_to_plots(flag < 998, n_plots) 
+    )
+
+  plot_check <- identical(
+    sort(unique(ret$flag)), 
+    walk_order$flag
+    )
+
+  if (!plot_check) {
+    stop(
+      "Missing one or more plots in scan that were entered on the form: ",
+      jsonlite::toJSON(
+        anti_join(walk_order, ret, by = "flag") %>% 
+          mutate(file = basename(ret$fn[1]))
+        )
+      )
+  }
+  
+  left_join(
+    ret, walk_order
+  ) %>% 
+    st_as_sf(
+      coords = c("LNG","LAT"), 
+      crs = 4326,
+      remove = F
+    )
+}
+
 ce1_plots <- 
   purrr::map(scans, "result") %>% 
   purrr::compact() %>% 
-  purrr::keep(~stringr::str_detect(.x$fn[1], "_ce1_")) %>%
-  purrr::map(
-    ~.x %>% 
-      mutate(
-        flag = RcppRoll::roll_max(LIDAR, 10, fill = NA),
-        flag = runs_to_plots(flag < 998, 4) # 4 plots in CE1 scans
+  purrr::keep(~stringr::str_detect(.x$fn[1], "_ce1_")) %>% 
+  purrr::map(purrr::safely(extract_ce_plots), n_plots = 4)
+
+ce2_plots <- 
+  purrr::map(scans, "result") %>% 
+  purrr::compact() %>% 
+  purrr::keep(~stringr::str_detect(.x$fn[1], "_ce2_")) %>% 
+  purrr::map(purrr::safely(extract_ce_plots), n_plots = 5)
+
+purrr::map(ce2_plots, "error") %>% 
+  purrr::compact()
+
+plot_ce <- function(elt) {
+  readline("Hit Enter to continue:")
+  
+  message(
+    cli::col_green("File: "),
+    cli::col_blue(basename(elt$fn[1]))
+  )
+  
+  sq <- make_square(elt) %>% st_as_sfc()
+  
+  centr_elt <- st_centroid(st_combine(elt))
+  centr_bbox <- st_centroid(st_as_sfc(st_bbox(elt)))
+  
+  vec <- 
+    (centr_elt - centr_bbox) %>% 
+    st_coordinates()
+  
+  loc <- 
+    paste0(
+      ifelse(vec[2] <= 0, "t", "b"),
+      ifelse(vec[1] <= 0, "r", "l"),
+      collapse = ""
+    )
+  
+  print(
+    ggplot(elt, aes(color = as.factor(paste(flag, plot_id, sep = "_")))) + 
+      geom_sf(data = sq, color = NA, fill = NA) +
+      geom_sf_label(
+        data = function(d) 
+          rbind("Start" = head(d, 1), "End" = tail(d, 1)) %>% 
+          mutate(label = c("Start", "End")),
+        aes(label = label), color = "black",
+        hjust = "inward", vjust = "inward",
+        fun.geometry = sf::st_centroid
+      ) +
+      geom_sf() +
+      labs(
+        color = "Plot Order"
+      ) +
+      scale_color_manual(
+        values = c("grey80", scales::hue_pal()(5)),
+        guide = guide_legend(override.aes = list(size = 8))
+      ) +
+      ggspatial::annotation_scale(
+        location = loc,
+        width_hint = 0.5
       )
   )
+}
+
+purrr::walk(
+  purrr::map(ce2_plots, "result") %>% 
+    purrr::compact(),
+  plot_ce
+)
 
 
 # Export: ----
@@ -298,26 +446,4 @@ ce1_plots <-
 
 
 
-# ce1_plots[6] |> 
-#   purrr::map(
-#     ~.x %>% 
-#       mutate(
-#         ts = paste(UTC_DATE, UTC_TIME, sep = "-"),
-#         ts = lubridate::dmy_hms(ts)
-#       ) %>% 
-#       ggplot(aes(LNG, LAT, color = as.factor(flag))) + 
-#       geom_point(size = 4, shape = 1, alpha = .7) +
-#       scale_color_viridis_d(direction = 1, option = "B") +
-#       labs(
-#         title = basename(.x$fn[1]) |> 
-#           str_remove(glue::glue("_{uuid_rx}.csv")),
-#         subtitle = str_extract(.x$fn[1], uuid_rx)
-#       )
-#   )
-# 
-# ggsave(
-#   filename = "weird_vermont.pdf",
-#   width = 8, height = 8,
-#   device = "pdf"
-# )
 

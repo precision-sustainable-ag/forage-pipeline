@@ -366,7 +366,7 @@ forage_extract_data_2023_ce1 <- function(elt) {
     tidyr::unnest(filename) %>% 
     mutate(
       id_code = field,
-      species = "rye",
+      species = "all",
       ext = str_to_lower(str_extract(filename, "jpg|JPG|csv|CSV")),
       type = case_when(
         ext == "jpg" ~ "I",
