@@ -1,5 +1,6 @@
 library(dplyr)
 library(sf)
+library(ggplot2)
 
 hex_rx <- function(...) {
   n <- c(...)
@@ -201,17 +202,59 @@ label_looped_scan <- function(lps, buffer_size) {
 }
 
 
-onfarm_loops <- 
+onfarm_loop_attempts <- 
   purrr::map(scans, "result") %>% 
   purrr::compact() %>% 
   purrr::keep(~stringr::str_detect(.x$fn[1], "_onfarm_")) %>% 
-  purrr::map(purrr::safely(extract_loop)) %>% 
+  purrr::map(purrr::safely(extract_loop))
+
+onfarm_loops <- 
+  onfarm_loop_attempts %>% 
   purrr::map("result") %>% 
   purrr::compact() %>%
   purrr::map(~label_looped_scan(.x, 5)) 
     # 5 meter radius from center of largest loop
 
+onfarm_loop_attempts %>% 
+  purrr::map("error") %>% 
+  purrr::compact()
 
+plot_onfarm <- function(elt) {
+  bb <- elt %>% 
+    filter(flag == 1) %>% 
+    st_bbox() %>% 
+    st_as_sfc()
+  
+  centr_elt <- st_centroid(st_combine(elt))
+  centr_bbox <- st_centroid(st_as_sfc(st_bbox(elt)))
+  
+  vec <- 
+    (centr_elt - centr_bbox) %>% 
+    st_coordinates()
+  
+  loc <- 
+    paste0(
+      ifelse(vec[2] <= 0, "t", "b"),
+      ifelse(vec[1] <= 0, "r", "l"),
+      collapse = ""
+    )
+
+  ggplot(elt, aes(color = as.factor(flag))) + 
+    geom_sf(show.legend = F) +
+    labs(
+      title = paste0("Number of points: ", nrow(filter(elt, flag == 1))),
+      subtitle = paste0("Area of bbox: ", format(st_area(bb)))
+      ) +
+    ggspatial::annotation_scale(
+      location = loc,
+      width_hint = 0.5
+      )
+}
+
+purrr::map(
+  onfarm_loops,
+  plot_onfarm
+)
 
 # _CE1: ----
 runs_to_plots <- function(flag, n) {
