@@ -18,6 +18,7 @@ forage_make_sidebar <- function(x, input) {
 }
 
 forage_make_tabs <- function(b, a) {
+
   purrr::pmap(
     b,
     function(step, err, uuid) {
@@ -43,6 +44,10 @@ forage_make_tabs <- function(b, a) {
 }
 
 forage_review <- function(bad_subs, all_subs) {
+  
+  bad_subs <- bad_subs %>% 
+    group_by(uuid, step) %>% 
+    summarise(err = paste(err, collapse = "\n- - - - - -\n"))
 
   tabs <- forage_make_tabs(bad_subs, all_subs) %>% 
     purrr::lift_dl(tabItems)(.) %>% 
@@ -88,6 +93,6 @@ forage_review <- function(bad_subs, all_subs) {
 }
 
 forage_review(
-  forms_to_check %>% select(-fn),
-  content(forage_submissions_response)$results
+  forms_to_check,
+  forage_submissions
 )
