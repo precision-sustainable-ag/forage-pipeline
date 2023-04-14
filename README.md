@@ -1,7 +1,6 @@
 # Step 1:
 `import_kobo_forage.R`
  - Reads in forms from the Kobo server
-   - #TODO read in all 3 versions of the form
  - pulls out the CSVs and images
  - renames them and uploads to blob
  - generates list of errors to review with Step 2
@@ -13,7 +12,7 @@
  - If error can be fixed, #TODO
  
 # Step 3:
-`blob_to_plot.R`
+`blob_to_plot_pipeline.R`
  - Reads in scan txt files inside blob storage
  - Parses into proper format
  - Splits into Onfarm, CE1, CE2 groups
