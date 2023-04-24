@@ -4,6 +4,7 @@
  - pulls out the CSVs and images
  - renames them and uploads to blob
  - generates list of errors to review with Step 2
+ - TODO update container name
  
 # Step 2:
 `forage_review.R`
