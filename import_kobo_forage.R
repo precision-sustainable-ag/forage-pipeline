@@ -46,7 +46,8 @@ known_bad_UUIDs <- c(
   "17bf06cd-5da8-4a4c-aea0-aaae100782bf",
   "2572255b-1cff-48e5-97f9-902c89ab20b9",
   "a4df08b1-f95a-4e55-a2ca-5033f8d11de6",
-  "2777c2fd-30c0-4992-a87f-c39dd8c9061c"
+  "2777c2fd-30c0-4992-a87f-c39dd8c9061c",
+  "09ced5c3-5c4f-4614-90f2-9f0f6db02212"
 )
 
 
@@ -472,7 +473,7 @@ forage_extract_data_2023_ce2 <- function(elt) {
   }
   ret
 }
-# fix up UUID 271c5cba
+# TODO fix up UUID 271c5cba
 
 raw_forms_filenames <- purrr::map(
   forage_submissions,
@@ -492,6 +493,13 @@ forage_parse <- function(elt, pre_existing = "") {
   
   urls <- forage_extract_urls(elt)
   files <- forage_extract_data(elt)
+  
+  if (nrow(filter(files, type == "S")) == 0) {
+    stop(
+      "Form missing all scan files: ",
+      jsonlite::toJSON(count(files, ext, type))
+      )
+  }
   
   # left_join needed here because there was a submission that
   #   had a "ghost" attachment, site YLM. A CSV was attached
@@ -513,8 +521,8 @@ forage_parse <- function(elt, pre_existing = "") {
 
 
 forage_download <- function(dl_url, file_nm) {
-  if (!dir.exists("forage_blobs")) {
-    stop("There's no `/forage_blobs` directory in: ", getwd())
+  if (!dir.exists("forage_submissions")) {
+    stop("There's no `/forage_submissions` directory in: ", getwd())
   }
   
   message(file_nm)
@@ -522,14 +530,14 @@ forage_download <- function(dl_url, file_nm) {
     "GET",
     dl_url,
     add_headers("Authorization" = kobo_token),
-    write_disk(file.path("forage_blobs", file_nm), overwrite = T),
+    write_disk(file.path("forage_submissions", file_nm), overwrite = T),
     progress()
   )
   
   # check size and status before proceeding
   stop_for_status(res)
   
-  local_fn <- normalizePath(file.path("forage_blobs", file_nm))
+  local_fn <- normalizePath(file.path("forage_submissions", file_nm))
   res_size <- headers(res)[["content-length"]] %>% 
     as.numeric()
   local_size <- file.size(local_fn)
@@ -697,10 +705,6 @@ forms_to_check <-
     .id = "step"
   )
 
-
-
-content(forage_submissions_response)$results %>% 
-  purrr::keep(~.x[["_uuid"]] %in% forms_to_check$uuid)
 
 
 
