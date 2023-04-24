@@ -60,7 +60,7 @@ blob_csvs <- stringr::str_subset(
 AzureStor::multidownload_blob(
   blob_ctr,
   blob_csvs,
-  file.path("forage_blobs", blob_csvs)
+  file.path("forage_unlabeled_blobs", blob_csvs)
 )
 
 
@@ -127,7 +127,7 @@ parse_box_from_dict <- function(fn) {
   } else {
     stop("Unknown sensor type: ", fn)
   }
-  
+
   data_lns <- 
     lns[str_detect(lns, "^[-+0-9]")] %>% 
     str_split(",")
@@ -155,11 +155,12 @@ parse_box_from_dict <- function(fn) {
     suffix = c("__01", "__02")
   ) %>% 
     mutate(fn = fn) %>% 
-    mutate_all(readr::parse_guess)
+    mutate_all(readr::parse_guess) %>% 
+    select(-SENSOR_ADDR__01, -SENSOR_ADDR__02)
 }
 
 scans <- dir(
-  "forage_blobs",
+  "forage_unlabeled_blobs",
   full.names = T,
   pattern = "csv"
 ) %>% 
@@ -168,12 +169,6 @@ scans <- dir(
   )
 
 purrr::map(scans, "error") %>% purrr::compact()
-
-purrr::map(scans, "error") %>% 
-  purrr::compact() %>% 
-  purrr::map("message") %>% 
-  purrr::map_chr(~str_extract(.x, "forage_.+$")) %>% 
-  purrr::map(~readr::read_lines(.x, n_max = 5))
 
 # _Onfarm: ----
 extract_loop <- function(trk) {
@@ -311,76 +306,6 @@ runs_to_plots <- function(flag, n) {
   inverse.rle(x)
 }
 
-extract_ce_plots <- function(dat, n_plots) {
-  meta <- basename(dat$fn[1]) %>% 
-    str_remove("\\.csv$") %>% 
-    str_split("_", simplify = T) %>% 
-    set_names(
-      c("boxtype", "proj", "location", "timing", "species",
-        "walk_order", "scan", "scan_date", "uuid")
-    )
-
-  walk_order <- 
-    tibble(
-      plot_id = c(
-        "alley",
-        meta[["walk_order"]] %>% 
-        str_split("~", simplify = T) %>% 
-        as.vector()
-      )
-    ) %>% 
-    slice(-2) %>%             # remove "rep" or "walk"
-    mutate(
-      flag = row_number() - 1 # index "alley" at 0
-    )
-  
-  
-  ret <- dat %>% 
-    mutate(
-      flag = RcppRoll::roll_max(LIDAR, 10, fill = NA),
-      flag = runs_to_plots(flag < 998, n_plots) 
-    )
-
-  plot_check <- identical(
-    sort(unique(ret$flag)), 
-    walk_order$flag
-    )
-
-  if (!plot_check) {
-    stop(
-      "Missing one or more plots in scan that were entered on the form: ",
-      jsonlite::toJSON(
-        anti_join(walk_order, ret, by = "flag") %>% 
-          mutate(file = basename(ret$fn[1]))
-        )
-      )
-  }
-  
-  left_join(
-    ret, walk_order
-  ) %>% 
-    st_as_sf(
-      coords = c("LNG","LAT"), 
-      crs = 4326,
-      remove = F
-    )
-}
-
-ce1_plots <- 
-  purrr::map(scans, "result") %>% 
-  purrr::compact() %>% 
-  purrr::keep(~stringr::str_detect(.x$fn[1], "_ce1_")) %>% 
-  purrr::map(purrr::safely(extract_ce_plots), n_plots = 4)
-
-ce2_plots <- 
-  purrr::map(scans, "result") %>% 
-  purrr::compact() %>% 
-  purrr::keep(~stringr::str_detect(.x$fn[1], "_ce2_")) %>% 
-  purrr::map(purrr::safely(extract_ce_plots), n_plots = 5)
-
-purrr::map(ce2_plots, "error") %>% 
-  purrr::compact()
-
 plot_ce <- function(elt) {
   readline("Hit Enter to continue:")
   
@@ -431,19 +356,221 @@ plot_ce <- function(elt) {
   )
 }
 
+plot_ce_error <- function(elt, walk_order) {
+  
+  sq <- make_square(elt) %>% st_as_sfc()
+  
+  centr_elt <- st_centroid(st_combine(elt))
+  centr_bbox <- st_centroid(st_as_sfc(st_bbox(elt)))
+  
+  vec <- 
+    (centr_elt - centr_bbox) %>% 
+    st_coordinates()
+  
+  loc <- 
+    paste0(
+      ifelse(vec[2] <= 0, "t", "b"),
+      ifelse(vec[1] <= 0, "r", "l"),
+      collapse = ""
+    )
+  
+  labeled <- 
+    ggplot(elt, aes(color = as.factor(paste(flag, plot_id, sep = "_")))) + 
+    geom_sf(data = sq, color = NA, fill = NA) +
+    geom_sf_label(
+      data = function(d) 
+        rbind("Start" = head(d, 1), "End" = tail(d, 1)) %>% 
+        mutate(label = c("Start", "End")),
+      aes(label = label), color = "black",
+      hjust = "inward", vjust = "inward",
+      fun.geometry = sf::st_centroid
+    ) +
+    geom_sf() +
+    labs(
+      color = "Plot Order",
+      title = glue::glue("Should be:\n{paste(walk_order[-1], collapse = '\n')}")
+    ) +
+    scale_color_manual(
+      values = c("black", scales::hue_pal()(5)),
+      guide = guide_legend(override.aes = list(size = 8))
+    ) +
+    ggspatial::annotation_scale(
+      location = loc,
+      width_hint = 0.5
+    )
+  
+  in_order <- 
+    elt %>% 
+    mutate(obs_num = row_number()) %>% 
+    ggplot(
+      aes(
+        obs_num, LIDAR, 
+        color = as.factor(paste(flag, plot_id, sep = "_"))
+      )
+    ) +
+    geom_point(show.legend = F) +
+    scale_color_manual(
+      values = c("black", scales::hue_pal()(5))
+    )
+  
+  path <- basename(elt$fn[1]) %>% 
+    str_remove(".csv$") %>% 
+    paste0(getwd(), "/PLOT_ERROR_", ., ".pdf")
+  
+  library(patchwork)
+  ggsave(
+    path, labeled + in_order,
+    width = 10, height = 8
+  )
+  
+  path
+}
+
+extract_ce_plots <- function(dat, n_plots) {
+  meta <- basename(dat$fn[1]) %>% 
+    str_remove("\\.csv$") %>% 
+    str_split("_", simplify = T) %>% 
+    set_names(
+      c("boxtype", "proj", "location", "timing", "species",
+        "walk_order", "scan", "scan_date", "uuid")
+    )
+
+  if (str_detect(meta[["walk_order"]], "walkB|walkD")) {
+    reverse_flag = T
+  } else { reverse_flag = F }
+  
+  walk_order <- 
+    tibble(
+      plot_id = c(
+        "alley",
+        meta[["walk_order"]] %>% 
+        str_split("~", simplify = T) %>% 
+        as.vector()
+      )
+    ) %>% 
+    slice(-2) %>%             # remove "rep" or "walk"
+    mutate(
+      flag = row_number() - 1 # index "alley" at 0,
+    ) 
+  
+  if (meta[["proj"]] == "ce2") {
+    walk_order <- 
+      walk_order %>% 
+      mutate(
+        rep = replace(
+          flag,
+          reverse_flag, 
+          c(0, rev(row_number())[-1]) 
+          # generates 0,1:5, then 0,5:1, then 0,4:1
+          )
+      )
+  } # TODO: fixed, but ugly. Will give 1-5 for A, C and 5-1 for B, D
+  
+  # TODO: is 0 the same as 999 in the data?
+  ret <- dat %>% 
+    mutate(
+      flag = RcppRoll::roll_max(LIDAR, 10, fill = NA),
+      flag = runs_to_plots(flag < 998, n_plots) 
+    )
+
+  plot_check <- identical(
+    sort(unique(ret$flag)), 
+    walk_order$flag
+    )
+  
+  labeled_scan <- 
+    left_join(
+    ret, walk_order
+  ) %>% 
+    st_as_sf(
+      coords = c("LNG","LAT"), 
+      crs = 4326,
+      remove = F
+    )
+  
+
+  
+  if (!plot_check) {
+    pathname <- 
+      plot_ce_error(labeled_scan, walk_order$plot_id)
+    stop(
+      "Missing one or more plots in scan that were entered on the form.\n",
+      "See file:\n",
+      pathname, "\n",
+      jsonlite::toJSON(
+        anti_join(walk_order, ret, by = "flag") %>%
+          mutate(file = basename(ret$fn[1]))
+        )
+      )
+  }
+  
+  labeled_scan
+  
+}
+
+ce1_plots <- 
+  purrr::map(scans, "result") %>% 
+  purrr::compact() %>% 
+  purrr::keep(~stringr::str_detect(.x$fn[1], "_ce1_")) %>% 
+  purrr::map(purrr::safely(extract_ce_plots), n_plots = 4)
+
+ce2_plots <- 
+  purrr::map(scans, "result") %>% 
+  purrr::compact() %>% 
+  purrr::keep(~stringr::str_detect(.x$fn[1], "_ce2_")) %>% 
+  purrr::map(purrr::safely(extract_ce_plots), n_plots = 5)
+
+purrr::map(ce2_plots, "error") %>% 
+  purrr::compact()
+
+
+
 purrr::walk(
   purrr::map(ce2_plots, "result") %>% 
     purrr::compact(),
   plot_ce
 )
 
+purrr::map(ce2_plots, "error") %>% 
+  purrr::compact()
 
+ce2_plots %>% 
+  purrr::map("result") %>% 
+  purrr::compact() %>% 
+  # purrr::keep(
+  #   ~str_detect(
+  #     .x$fn[1], 
+  #     "box214v2_ce2_NCCE2_brown_rye_walkA~planting-brown~bare~planting-green~planting-greenbrown~bare_S_20230331_549bb4ec-9114-47e6-889a-2b9d66ad8fb2.csv"
+  #     )
+  #   ) %>% 
+  .[[1]] %>% 
+  mutate(r = row_number()) %>% 
+  ggplot(aes(r, LIDAR, color = plot_id)) +
+  geom_point()
+
+
+ce2_plots %>% 
+  purrr::map("result") %>% 
+  purrr::compact() %>% 
+  .[[5]] %>%
+  ggplot(aes(LNG, LAT, shape = as.factor(rep))) +
+    geom_point() +
+  geom_point(data = function(d) slice(d, 1), size = 10)
 # Export: ----
 
-# drop geometry and resave as CSV?
-# save as shapefiles or geoJSON?
+# AzureStor::multidownload_blob(
+#   blob_ctr,
+#   blob_csvs,
+#   file.path("forage_unlabeled_blobs", blob_csvs)
+# )
 
+# TODO: currently container is encoded in the SAS token, but if we want
+#   different folders for each step, maybe we need a different token
 
+onfarm_loops
+purrr::map(ce1_plots, "result")
+purrr::map(ce2_plots, "result")
 
-
+ce2_plots[[12]]$result %>% 
+  sf::st_write("test_sf.shp")
 
