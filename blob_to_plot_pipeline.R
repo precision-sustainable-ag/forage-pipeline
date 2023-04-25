@@ -42,10 +42,10 @@ source("secret.R")
 
 # Fetch: ----
 blob_ctr <- 
-  AzureStor::blob_container(
+  AzureStor::list_blob_containers(
     sas_endpoint, 
     sas = sas_token
-  ) 
+  )[["landing"]] 
 
 existing_blobs <- 
   AzureStor::list_blobs(
@@ -60,7 +60,7 @@ blob_csvs <- stringr::str_subset(
 AzureStor::multidownload_blob(
   blob_ctr,
   blob_csvs,
-  file.path("forage_unlabeled_blobs", blob_csvs)
+  file.path("blobs_without_plot_labels", blob_csvs)
 )
 
 
@@ -160,7 +160,7 @@ parse_box_from_dict <- function(fn) {
 }
 
 scans <- dir(
-  "forage_unlabeled_blobs",
+  "blobs_without_plot_labels",
   full.names = T,
   pattern = "csv"
 ) %>% 
@@ -556,21 +556,59 @@ ce2_plots %>%
   ggplot(aes(LNG, LAT, shape = as.factor(rep))) +
     geom_point() +
   geom_point(data = function(d) slice(d, 1), size = 10)
+
+
 # Export: ----
 
-# AzureStor::multidownload_blob(
-#   blob_ctr,
-#   blob_csvs,
-#   file.path("forage_unlabeled_blobs", blob_csvs)
-# )
 
-# TODO: currently container is encoded in the SAS token, but if we want
-#   different folders for each step, maybe we need a different token
+onfarm_loops %>% 
+  purrr::map(
+    ~{
+      fn <- basename(.x$fn[1]) %>% 
+        str_replace(".csv$", ".geojson")
+      
+      sf::st_write(.x, file.path("plots_with_labels", fn))
+    }
+  )
 
-onfarm_loops
-purrr::map(ce1_plots, "result")
-purrr::map(ce2_plots, "result")
+ce1_plots %>% 
+  purrr::map("result") %>% 
+  purrr::map(
+    ~{
+      fn <- basename(.x$fn[1]) %>% 
+        str_replace(".csv$", ".geojson")
+      
+      sf::st_write(.x, file.path("plots_with_labels", fn))
+    }
+  )
 
-ce2_plots[[12]]$result %>% 
-  sf::st_write("test_sf.shp")
+ce2_plots %>% 
+  purrr::map("result") %>% 
+  purrr::map(
+    ~{
+      fn <- basename(.x$fn[1]) %>% 
+        str_replace(".csv$", ".geojson")
+      
+      sf::st_write(.x, file.path("plots_with_labels", fn))
+    }
+  )
+
+lbl_ctr <- AzureStor::list_blob_containers(
+  sas_endpoint, 
+  sas = sas_token
+)[["01-plots-with-labels"]] 
+
+labeled_blobs_pushed <- 
+  dir(
+    "plots_with_labels",
+    full.names = T,
+    pattern = "geojson"
+  ) %>%
+  purrr::map(
+    ~purrr::safely(forage_upload)(.x, lbl_ctr),
+  )
+
+labeled_blobs_pushed %>% 
+  purrr::map("error") %>% 
+  purrr::compact()
 

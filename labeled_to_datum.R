@@ -5,25 +5,25 @@ source("secret.R")
 
 # Fetch: ----
 blob_ctr <- 
-  AzureStor::blob_container(
+  AzureStor::list_blob_containers(
     sas_endpoint, 
     sas = sas_token
-  ) 
+  )[["01-plots-with-labels"]] 
 
 existing_blobs <- 
   AzureStor::list_blobs(
     blob_ctr, info = "name"
   )
 
-blob_csvs <- stringr::str_subset(
+blob_geojsons <- stringr::str_subset(
   existing_blobs,
-  glue::glue("{uuid_rx}\\.csv")
+  glue::glue("{uuid_rx}\\.geojson")
 )
 
 AzureStor::multidownload_blob(
   blob_ctr,
-  blob_csvs,
-  file.path("forage_labeled_blobs", blob_csvs)
+  blob_geojsons,
+  file.path("plots_with_labels", blob_geojsons)
 )
 
 hex_rx <- function(...) {
@@ -43,7 +43,7 @@ most_common <- function(x) {
 
 
 scans <- dir(
-  "forage_labeled_blobs",
+  "plots_with_labels",
   full.names = T,
   pattern = "geojson"
 ) %>% 
@@ -57,6 +57,7 @@ track_rm_outliers <- function(trk) {
 
   trk_clean <- 
     trk %>%  
+    filter(!(flag == 0 & str_detect(fn, "_ce1_|_ce2_"))) %>% 
     filter(!is.na(SONAR), !is.na(LIDAR)) %>%  
     filter(SONAR < 999, LIDAR < 999)
   
@@ -75,7 +76,7 @@ track_rm_outliers <- function(trk) {
   sonar_3sd_high = sonar_mean + (sonar_sd * 3)
   
   trk_outliers_removed <-
-    trk_clean %>%
+    trk %>%  
     filter(LIDAR < lidar_3sd_high & LIDAR > lidar_3sd_low) %>%
     filter(SONAR < sonar_3sd_high & SONAR > sonar_3sd_low)
 }
@@ -112,27 +113,43 @@ track_add_datum <- function(trk) {
   # For 211, the lasers are divided by 3.1 to get cm and the sonic is x/15.6
 }
 
-ce2_with_height <- 
-  ce2_plots %>% 
-  purrr::map("result") %>% 
-  purrr::compact() %>% .[1] %>% 
-# scans %>% 
+
+
+
+
+labeled_plots_with_datum_to_push <- 
+  scans %>% 
   purrr::map(
-    ~track_rm_outliers(.x) %>%
+    ~track_rm_outliers(.x) %>% 
       track_add_datum()
   )
 
-
-onfarm_loops_with_heights <- 
-  onfarm_loops |> 
+labeled_plots_with_datum_to_push %>% 
   purrr::map(
-    ~track_rm_outliers(.x) |> 
-      track_add_datum()
+    ~{
+      fn <- basename(.x$fn[1])
+      
+      sf::st_write(.x, file.path("plots_with_datum", fn))
+    }
   )
 
-# re-export to blob storage ----
+lbl_ctr <- AzureStor::list_blob_containers(
+  sas_endpoint, 
+  sas = sas_token
+)[["02-plots-with-datum"]] 
 
+labeled_plots_with_datum_pushed <- 
+  dir(
+    "plots_with_datum",
+    full.names = T,
+    pattern = "geojson"
+  ) %>%
+  purrr::map(
+    ~purrr::safely(forage_upload)(.x, lbl_ctr),
+  )
 
-
+labeled_plots_with_datum_pushed %>% 
+  purrr::map("error") %>% 
+  purrr::compact()
 
 

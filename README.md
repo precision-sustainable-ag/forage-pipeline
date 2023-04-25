@@ -35,8 +35,12 @@
  - Upload calibrated files to blob storage in next container, #TODO
 
 # Step 5:
-`datum_to_summary_bm.R`
+`datum_to_summary.R`
  - Generate regression input metrics for each plot (proportions, means, SD, etc)
+ - TODO: remove biomass logic to new file
+ 
+# Step 6:
+`summary_add_biomass.R`
  - #TODO read in biomass from each source and join to summary
    - Onfarm: partial
    - CE1: TODO

@@ -59,10 +59,10 @@ source("secret.R")
 
 # Fetch: ----
 blob_ctr <- 
-  AzureStor::blob_container(
+  AzureStor::list_blob_containers(
     sas_endpoint, 
     sas = sas_token
-  ) 
+  )[["landing"]]
 
 existing_blobs <- 
   AzureStor::list_blobs(
