@@ -4,5 +4,9 @@
 .Ruserdata
 
 secret.R
-forage_blobs/
+forage_submissions/
+blobs_without_plot_labels/
+plots_with_labels/
+blobs_without_datum/
+plots_with_datum/
 *.pdf
