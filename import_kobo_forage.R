@@ -6,6 +6,11 @@ library(DBI)
 library(stringr)
 library(glue)
 
+dir.create("forage_submissions")
+dir.create("plots_with_labels")
+dir.create("plots_with_datum")
+
+
 hex_rx <- function(...) {
   n <- c(...)
   hex <- "[a-fA-F0-9]"
@@ -47,7 +52,14 @@ known_bad_UUIDs <- c(
   "2572255b-1cff-48e5-97f9-902c89ab20b9",
   "a4df08b1-f95a-4e55-a2ca-5033f8d11de6",
   "2777c2fd-30c0-4992-a87f-c39dd8c9061c",
-  "09ced5c3-5c4f-4614-90f2-9f0f6db02212"
+  "09ced5c3-5c4f-4614-90f2-9f0f6db02212",
+  "09ced5c3-5c4f-4614-90f2-9f0f6db02212",
+  "0a6915a2-e5ea-422a-88f4-b1caa24386e1",
+  "188b4dd9-070e-4491-8846-21018b6d9e46",
+  "50f2717f-f1db-4c58-bb00-1c42056220f3",
+  "9a15301e-8abd-4f58-994c-417c84492e3b",
+  "a93dcf88-8f41-415c-9f0f-2fdcf9c22f1c",
+  "af1cc7d5-ee79-4ced-ab6f-dbabd49aeb94"
 )
 
 
@@ -62,7 +74,7 @@ blob_ctr <-
   AzureStor::list_blob_containers(
     sas_endpoint, 
     sas = sas_token
-  )[["landing"]]
+  )[["landing-zone"]]
 
 existing_blobs <- 
   AzureStor::list_blobs(
@@ -489,14 +501,13 @@ forage_parse <- function(elt, pre_existing = "") {
   if (meta$uuid %in% pre_existing) {
     return(NULL)
   }
-  
-  
+
   urls <- forage_extract_urls(elt)
   files <- forage_extract_data(elt)
   
   if (nrow(filter(files, type == "S")) == 0) {
     stop(
-      "Form missing all scan files: ",
+      "Form missing all scan files:\n", meta$uuid, "\n",
       jsonlite::toJSON(count(files, ext, type))
       )
   }
@@ -557,10 +568,6 @@ forage_download <- function(dl_url, file_nm) {
   return(local_fn)
   
 }
-
-
-
-
 
 forage_upload <- function(lcl_nm, cnt) {
   if (length(lcl_nm) > 1) { 

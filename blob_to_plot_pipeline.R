@@ -27,17 +27,7 @@ make_square <- function(obj) {
 
 # Authenticate: ----
 source("secret.R")
-# sas_token <- 
-#   readr::read_lines(
-#     "secret.R"
-#   ) %>% 
-#   purrr::set_names(stringr::word(.)) %>% 
-#   purrr::keep(~stringr::str_detect(.x, "^sas|^endpoint")) %>% 
-#   bind_rows() %>% 
-#   mutate_all(
-#     ~stringr::str_extract(., '".+"$') %>% 
-#       stringr::str_remove_all('"')
-#   )
+
 
 
 # Fetch: ----
@@ -45,7 +35,7 @@ blob_ctr <-
   AzureStor::list_blob_containers(
     sas_endpoint, 
     sas = sas_token
-  )[["landing"]] 
+  )[["landing-zone"]] 
 
 existing_blobs <- 
   AzureStor::list_blobs(
@@ -56,6 +46,8 @@ blob_csvs <- stringr::str_subset(
   existing_blobs,
   glue::glue("{uuid_rx}\\.csv")
 )
+
+# TODO: subset out files that are already in 01-plots-with-labels
 
 AzureStor::multidownload_blob(
   blob_ctr,

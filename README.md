@@ -1,3 +1,6 @@
+# Step 0:
+ - After cloning this repo, open a new RStudio project in this directory, then run at the console: `source("renv/activate.R")`
+
 # Step 1:
 `import_kobo_forage.R`
  - Reads in forms from the Kobo server
