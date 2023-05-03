@@ -9,6 +9,8 @@ library(glue)
 dir.create("forage_submissions")
 dir.create("plots_with_labels")
 dir.create("plots_with_datum")
+dir.create("blobs_without_plot_labels")
+dir.create("blobs_without_datum")
 
 
 hex_rx <- function(...) {
@@ -228,6 +230,8 @@ forage_extract_data <- function(elt) {
     "v5gRvjhRAGtyuJaredYtSe" = forage_extract_data_2023_ce1,
     "vDMCUQLU8rgUzdALXfnwes" = forage_extract_data_2023_ce2,
     "vkYzYnhqFb2EyyauMUVMxh" = forage_extract_data_2023_ce2,
+    "vBcugdcYhkjJFR5pJCxnPQ" = forage_extract_data_2023_ce1,
+    "vDSLduafNzHx2Xo5bNBJXp" = forage_extract_data_2023_ce1,
     err
   )
 
@@ -351,14 +355,18 @@ forage_extract_data_2023_ce1 <- function(elt) {
     arrange(id_code, order) %>% 
     group_by(id_code) %>% 
     summarise(treatment = paste(treatment, collapse = "~"))
-  
-  if (!length(elt[["timing"]])) {
+
+  if (!length(elt[["timing"]]) & !length(elt[["time"]])) {
     stop("Missing treatment timing, UUID: ", elt[["_uuid"]])
   }
   
   photo_ids <- 
     expand.grid(
-      treatment = ifelse(elt[["timing"]] == "no", "early", "biomass"),
+      treatment = ifelse(
+        (elt[["timing"]] %||% elt[["time"]]) == "no", 
+        "early", 
+        "biomass"
+        ),
       id_code = paste0("rep", as.character(1:4)),
       species = c("rye", "legume", "mix", "bare")
     ) %>% 

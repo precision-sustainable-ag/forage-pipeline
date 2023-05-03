@@ -42,17 +42,36 @@ existing_blobs <-
     blob_ctr, info = "name"
   )
 
-blob_csvs <- stringr::str_subset(
-  existing_blobs,
-  glue::glue("{uuid_rx}\\.csv")
-)
+labeled_blobs <- 
+  AzureStor::list_blobs(
+    AzureStor::list_blob_containers(
+      sas_endpoint, 
+      sas = sas_token
+    )[["01-plots-with-labels"]], 
+    info = "name"
+  ) %>% 
+  stringr::str_extract(uuid_rx) %>% 
+  unique()
 
-# TODO: subset out files that are already in 01-plots-with-labels
+
+blob_csvs <- 
+  stringr::str_subset(
+    existing_blobs,
+    glue::glue("{uuid_rx}\\.csv")
+  ) %>% 
+  stringr::str_subset(
+    "_ce1_|_ce2_|_onfarm_"
+  ) %>% 
+  str_subset(
+    paste(labeled_blobs, collapse = "|"),
+    negate = T
+  )
 
 AzureStor::multidownload_blob(
   blob_ctr,
   blob_csvs,
-  file.path("blobs_without_plot_labels", blob_csvs)
+  file.path("blobs_without_plot_labels", blob_csvs),
+  overwrite = T
 )
 
 
@@ -63,6 +82,8 @@ parse_box_from_dict <- function(fn) {
   
   if (!length(lns)) { stop("Empty scanfile: ", fn) }
   
+  if (!str_detect(lns[1], "LAT")) { stop("Missing GPS: ", fn) }
+
   sensor_type <- str_extract(head(lns), "ASC-210|PHENOM_ACS435") %>% na.omit()
   has_voltage <- any(str_detect(head(lns), "INT_VOLT|EXT_VOLT"))
   
@@ -120,8 +141,18 @@ parse_box_from_dict <- function(fn) {
     stop("Unknown sensor type: ", fn)
   }
 
+  lns <- lns[str_detect(lns, "^[-+0-9]")]
+
+  trailing_flag <- 
+    all(str_detect(lns, ",$")) & 
+    length(hdr[[1]]) == str_count(tail(lns, 1), ",")
+
+  if (trailing_flag) {
+    lns <- str_remove(lns, ",$")
+  }
+    
   data_lns <- 
-    lns[str_detect(lns, "^[-+0-9]")] %>% 
+    lns %>% 
     str_split(",")
   
   data_lns_idx <- purrr::map_dbl(
@@ -151,13 +182,12 @@ parse_box_from_dict <- function(fn) {
     select(-SENSOR_ADDR__01, -SENSOR_ADDR__02)
 }
 
-scans <- dir(
+scans <- file.path(
   "blobs_without_plot_labels",
-  full.names = T,
-  pattern = "csv"
+  blob_csvs
 ) %>% 
   purrr::map(
-    ~purrr::safely(parse_box_from_dict)(.x),
+    ~purrr::safely(parse_box_from_dict)(.x)
   )
 
 purrr::map(scans, "error") %>% purrr::compact()
@@ -512,16 +542,23 @@ ce2_plots <-
   purrr::keep(~stringr::str_detect(.x$fn[1], "_ce2_")) %>% 
   purrr::map(purrr::safely(extract_ce_plots), n_plots = 5)
 
-purrr::map(ce2_plots, "error") %>% 
-  purrr::compact()
 
 
 
+
+purrr::walk(
+  purrr::map(ce1_plots, "result") %>% 
+    purrr::compact(),
+  plot_ce
+)
 purrr::walk(
   purrr::map(ce2_plots, "result") %>% 
     purrr::compact(),
   plot_ce
 )
+
+purrr::map(ce1_plots, "error") %>% 
+  purrr::compact()
 
 purrr::map(ce2_plots, "error") %>% 
   purrr::compact()
@@ -565,6 +602,7 @@ onfarm_loops %>%
 
 ce1_plots %>% 
   purrr::map("result") %>% 
+  purrr::compact() %>% 
   purrr::map(
     ~{
       fn <- basename(.x$fn[1]) %>% 
@@ -576,6 +614,7 @@ ce1_plots %>%
 
 ce2_plots %>% 
   purrr::map("result") %>% 
+  purrr::compact() %>% 
   purrr::map(
     ~{
       fn <- basename(.x$fn[1]) %>% 
