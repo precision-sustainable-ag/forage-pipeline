@@ -23,7 +23,8 @@ blob_geojsons <- stringr::str_subset(
 AzureStor::multidownload_blob(
   blob_ctr,
   blob_geojsons,
-  file.path("blobs_without_datum", blob_geojsons)
+  file.path("blobs_without_datum", blob_geojsons),
+  overwrite = T
 )
 
 hex_rx <- function(...) {
@@ -133,6 +134,7 @@ labeled_plots_without_outliers %>%
 labeled_plots_with_datum_to_push <- 
   labeled_plots_without_outliers %>% 
   purrr::map("result") %>% 
+  purrr::compact() %>% 
   purrr::map(track_add_datum)
 
 
@@ -142,8 +144,10 @@ labeled_plots_with_datum_to_push %>%
       fn <- basename(.x$fn[1]) %>% 
         str_replace(".csv$", ".geojson")
       if (is.na(fn)) { browser() }
+      
       sf::st_write(
-        .x, file.path("plots_with_datum", fn)
+        .x, file.path("plots_with_datum", fn),
+        delete_dsn = T
         )
     }
   )
