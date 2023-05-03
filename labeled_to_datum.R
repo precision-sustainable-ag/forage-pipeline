@@ -23,7 +23,7 @@ blob_geojsons <- stringr::str_subset(
 AzureStor::multidownload_blob(
   blob_ctr,
   blob_geojsons,
-  file.path("plots_with_labels", blob_geojsons)
+  file.path("blobs_without_datum", blob_geojsons)
 )
 
 hex_rx <- function(...) {
@@ -43,7 +43,7 @@ most_common <- function(x) {
 
 
 scans <- dir(
-  "plots_with_labels",
+  "blobs_without_datum",
   full.names = T,
   pattern = "geojson"
 ) %>% 
@@ -79,6 +79,12 @@ track_rm_outliers <- function(trk) {
     trk %>%  
     filter(LIDAR < lidar_3sd_high & LIDAR > lidar_3sd_low) %>%
     filter(SONAR < sonar_3sd_high & SONAR > sonar_3sd_low)
+  
+  if (!nrow(trk_outliers_removed)) {
+    stop("All rows removed in outlier step for: ", trk$fn[1])
+  }
+  
+  trk_outliers_removed
 }
 
 track_add_datum <- function(trk) {
@@ -114,22 +120,31 @@ track_add_datum <- function(trk) {
 }
 
 
+labeled_plots_without_outliers <- 
+  scans %>% 
+  purrr::map(
+    ~purrr::safely(track_rm_outliers)(.x)
+    )
 
+labeled_plots_without_outliers %>% 
+  purrr::map("error")
 
 
 labeled_plots_with_datum_to_push <- 
-  scans %>% 
-  purrr::map(
-    ~track_rm_outliers(.x) %>% 
-      track_add_datum()
-  )
+  labeled_plots_without_outliers %>% 
+  purrr::map("result") %>% 
+  purrr::map(track_add_datum)
+
 
 labeled_plots_with_datum_to_push %>% 
   purrr::map(
     ~{
-      fn <- basename(.x$fn[1])
-      
-      sf::st_write(.x, file.path("plots_with_datum", fn))
+      fn <- basename(.x$fn[1]) %>% 
+        str_replace(".csv$", ".geojson")
+      if (is.na(fn)) { browser() }
+      sf::st_write(
+        .x, file.path("plots_with_datum", fn)
+        )
     }
   )
 
