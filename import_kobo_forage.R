@@ -6,11 +6,9 @@ library(DBI)
 library(stringr)
 library(glue)
 
+unlink("forage_submissions", recursive = T)
 dir.create("forage_submissions")
-dir.create("plots_with_labels")
-dir.create("plots_with_datum")
-dir.create("blobs_without_plot_labels")
-dir.create("blobs_without_datum")
+
 
 
 hex_rx <- function(...) {
@@ -505,6 +503,9 @@ raw_forms_filenames %>% purrr::map("error")
 
 forage_parse <- function(elt, pre_existing = "") {
   
+  # TODO: have the NULL return before checking metadata 
+  #   for known bad UUIDS
+
   meta <- forage_extract_metadata(elt)
   if (meta$uuid %in% pre_existing) {
     return(NULL)
@@ -718,7 +719,8 @@ forms_to_check <-
         uuid = stringr::str_extract(uuid, uuid_rx)
       ),
     .id = "step"
-  )
+  ) %>% 
+  filter(!(uuid %in% known_bad_UUIDs))
 
 
 

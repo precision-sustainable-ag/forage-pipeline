@@ -2,6 +2,12 @@ library(dplyr)
 library(sf)
 library(ggplot2)
 
+unlink("plots_with_labels", recursive = T)
+dir.create("plots_with_labels")
+unlink("blobs_without_plot_labels", recursive = T)
+dir.create("blobs_without_plot_labels")
+dir.create("diagnostic_plots")
+
 hex_rx <- function(...) {
   n <- c(...)
   hex <- "[a-fA-F0-9]"
@@ -73,7 +79,6 @@ AzureStor::multidownload_blob(
   file.path("blobs_without_plot_labels", blob_csvs),
   overwrite = T
 )
-
 
 # Extract plot locations: ----
 parse_box_from_dict <- function(fn) {
@@ -437,11 +442,12 @@ plot_ce_error <- function(elt, walk_order) {
   
   path <- basename(elt$fn[1]) %>% 
     str_remove(".csv$") %>% 
-    paste0(getwd(), "/PLOT_ERROR_", ., ".pdf")
+    paste0("/PLOT_ERROR_", ., ".pdf")
   
   library(patchwork)
   ggsave(
-    path, labeled + in_order,
+    file.path(getwd(), "diagnostic_plots", path), 
+    labeled + in_order,
     width = 10, height = 8
   )
   
@@ -530,6 +536,8 @@ extract_ce_plots <- function(dat, n_plots) {
   
 }
 
+# TODO: move error plots to another folder
+# 
 ce1_plots <- 
   purrr::map(scans, "result") %>% 
   purrr::compact() %>% 
@@ -643,3 +651,5 @@ labeled_blobs_pushed %>%
   purrr::map("error") %>% 
   purrr::compact()
 
+# TODO!! don't upload any files in steps if something from
+#   that UUID is failing!!!

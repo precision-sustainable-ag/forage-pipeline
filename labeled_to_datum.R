@@ -2,6 +2,25 @@ library(dplyr)
 
 source("secret.R")
 
+hex_rx <- function(...) {
+  n <- c(...)
+  hex <- "[a-fA-F0-9]"
+  glue::glue("{hex}{{{n}}}") %>% 
+    paste0(collapse = "-")
+}
+
+uuid_rx <- hex_rx(8, 4, 4, 4, 12)  
+
+most_common <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+
+unlink("plots_with_datum", recursive = T)
+dir.create("plots_with_datum")
+unlink("blobs_without_datum", recursive = T)
+dir.create("blobs_without_datum")
 
 # Fetch: ----
 blob_ctr <- 
@@ -15,10 +34,31 @@ existing_blobs <-
     blob_ctr, info = "name"
   )
 
-blob_geojsons <- stringr::str_subset(
-  existing_blobs,
-  glue::glue("{uuid_rx}\\.geojson")
-)
+
+
+
+datumed_blobs <- 
+  AzureStor::list_blobs(
+    AzureStor::list_blob_containers(
+      sas_endpoint, 
+      sas = sas_token
+    )[["02-plots-with-datum"]], 
+    info = "name"
+  ) %>% 
+  stringr::str_extract(uuid_rx) %>% 
+  unique()
+
+
+blob_geojsons <- 
+  stringr::str_subset(
+    existing_blobs,
+    glue::glue("{uuid_rx}\\.geojson")
+  ) %>% 
+  str_subset(
+    paste(datumed_blobs, collapse = "|"),
+    negate = T
+  )
+
 
 AzureStor::multidownload_blob(
   blob_ctr,
@@ -27,20 +67,10 @@ AzureStor::multidownload_blob(
   overwrite = T
 )
 
-hex_rx <- function(...) {
-  n <- c(...)
-  hex <- "[a-fA-F0-9]"
-  glue::glue("{hex}{{{n}}}") %>% 
-    paste0(collapse = "-")
-}
-
-uuid_rx <- hex_rx(8, 4, 4, 4, 12)  
 
 
-most_common <- function(x) {
-  ux <- unique(x)
-  ux[which.max(tabulate(match(x, ux)))]
-}
+
+
 
 
 scans <- dir(
@@ -157,6 +187,8 @@ lbl_ctr <- AzureStor::list_blob_containers(
   sas = sas_token
 )[["02-plots-with-datum"]] 
 
+# TODO: don't overwrite existing blobs?
+
 labeled_plots_with_datum_pushed <- 
   dir(
     "plots_with_datum",
@@ -172,3 +204,5 @@ labeled_plots_with_datum_pushed %>%
   purrr::compact()
 
 
+# TODO!! don't upload any files in steps if something from
+#   that UUID is failing!!!
