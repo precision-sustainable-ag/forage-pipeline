@@ -31,6 +31,11 @@ make_square <- function(obj) {
   b
 }
 
+filter_uuids <- function(x, targets) {
+  x_uuid <- stringr::str_extract(x, uuid_rx)
+  x[!(x_uuid %in% targets)]
+}
+
 # Authenticate: ----
 source("secret.R")
 
@@ -68,10 +73,8 @@ blob_csvs <-
   stringr::str_subset(
     "_ce1_|_ce2_|_onfarm_"
   ) %>% 
-  str_subset(
-    paste(labeled_blobs, collapse = "|"),
-    negate = T
-  )
+  filter_uuids(labeled_blobs)
+
 
 AzureStor::multidownload_blob(
   blob_ctr,

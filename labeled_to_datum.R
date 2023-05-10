@@ -16,6 +16,11 @@ most_common <- function(x) {
   ux[which.max(tabulate(match(x, ux)))]
 }
 
+filter_uuids <- function(x, targets) {
+  x_uuid <- stringr::str_extract(x, uuid_rx)
+  x[!(x_uuid %in% targets)]
+}
+
 
 unlink("plots_with_datum", recursive = T)
 dir.create("plots_with_datum")
@@ -54,10 +59,8 @@ blob_geojsons <-
     existing_blobs,
     glue::glue("{uuid_rx}\\.geojson")
   ) %>% 
-  str_subset(
-    paste(datumed_blobs, collapse = "|"),
-    negate = T
-  )
+  filter_uuids(datumed_blobs)
+
 
 
 AzureStor::multidownload_blob(
