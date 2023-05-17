@@ -93,7 +93,7 @@ forage_review <- function(bad_subs, all_subs) {
 }
 
 forage_review(
-  forms_to_check,
+  forms_to_check %>% filter(!is.na(uuid)),
   forage_submissions
 )
 

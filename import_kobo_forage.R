@@ -119,6 +119,14 @@ forage_submissions <-
 # Function definitions: ----
 forage_extract_metadata <- function(elt) {
   
+  scan_date = (elt[["date"]] %||% elt[["today"]]) %>% str_remove_all("-")
+  uuid = elt[["_uuid"]]
+  timing = elt[["time"]] %||% elt[["timing"]] %||% "biomass" 
+  
+  if (uuid %in% known_bad_UUIDs) {
+    return(NULL)
+  }
+  
   sub_time = lubridate::ymd_hms(elt[["_submission_time"]])
   if (sub_time < lubridate::ymd_hms("2021-12-31 00:00:00")) {
     stop("Very old form version, _uuid: ", elt[["_uuid"]])
@@ -129,10 +137,6 @@ forage_extract_metadata <- function(elt) {
     proj = "onfarm"
   }
   
-  scan_date = (elt[["date"]] %||% elt[["today"]]) %>% str_remove_all("-")
-  uuid = elt[["_uuid"]]
-  timing = elt[["time"]] %||% elt[["timing"]] %||% "biomass" 
-
   location = 
     (elt[["code"]] %||% elt[["ce1"]] %||% elt[["ce2"]] %||% "") %>% 
     str_trim() %>% 
@@ -178,6 +182,7 @@ raw_forms_metadata <-
   )
 
 raw_forms_metadata %>% purrr::map("error")
+raw_forms_metadata %>% purrr::map("result")
 
 
 forage_extract_urls <- function(elt) {
@@ -502,12 +507,10 @@ raw_forms_filenames %>% purrr::map("result")
 raw_forms_filenames %>% purrr::map("error")
 
 forage_parse <- function(elt, pre_existing = "") {
-  
-  # TODO: have the NULL return before checking metadata 
-  #   for known bad UUIDS
 
+  # TODO: generating "argument is of length zero err"
   meta <- forage_extract_metadata(elt)
-  if (meta$uuid %in% pre_existing) {
+  if (!length(meta) | meta$uuid %in% pre_existing) {
     return(NULL)
   }
 
