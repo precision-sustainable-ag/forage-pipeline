@@ -36,6 +36,8 @@ filter_uuids <- function(x, targets) {
   x[!(x_uuid %in% targets)]
 }
 
+
+
 # Authenticate: ----
 source("secret.R")
 
@@ -176,7 +178,7 @@ parse_box_from_dict <- function(fn) {
   
   dfs_list <- split(data_dfs, data_lns_idx)
   
-  full_join(
+  ret <- full_join(
     bind_rows(dfs_list[[1]]), 
     bind_rows(dfs_list[[2]]),
     by = c(
@@ -188,6 +190,9 @@ parse_box_from_dict <- function(fn) {
     mutate(fn = fn) %>% 
     mutate_all(readr::parse_guess) %>% 
     select(-SENSOR_ADDR__01, -SENSOR_ADDR__02)
+  
+  
+  ret
 }
 
 scans <- file.path(
@@ -201,6 +206,79 @@ scans <- file.path(
 purrr::map(scans, "error") %>% purrr::compact()
 
 # _Onfarm: ----
+plot_onfarm_error <- function(elt, jmps) {
+  sq <- make_square(elt) %>% st_as_sfc()
+  
+  centr_elt <- st_centroid(st_combine(elt))
+  centr_bbox <- st_centroid(st_as_sfc(st_bbox(elt)))
+  
+  vec <- 
+    (centr_elt - centr_bbox) %>% 
+    st_coordinates()
+  
+  loc <- 
+    paste0(
+      ifelse(vec[2] <= 0, "t", "b"),
+      ifelse(vec[1] <= 0, "r", "l"),
+      collapse = ""
+    )
+  
+  labeled <- 
+    ggplot(elt, aes(color = as.factor(flag))) + 
+    geom_sf(data = sq, color = NA, fill = NA) +
+    geom_sf_label(
+      data = function(d) 
+        rbind("Start" = head(d, 1), "End" = tail(d, 1)) %>% 
+        mutate(label = c("Start", "End")),
+      aes(label = label), color = "black",
+      hjust = "inward", vjust = "inward",
+      fun.geometry = sf::st_centroid
+    ) +
+    geom_sf() +
+    geom_sf(
+      data = jmps, 
+      shape = 0, size = 4, 
+      show.legend = F, inherit.aes = F
+      ) +
+    # scale_color_manual(
+    #   #values = c("black", scales::hue_pal()(5)),
+    #   guide = guide_legend(override.aes = list(size = 8))
+    # ) +
+    labs(
+      title = paste0("Number of points: ", nrow(filter(elt, flag == 1)))
+    ) +
+    ggspatial::annotation_scale(
+      location = loc,
+      width_hint = 0.5
+    )
+  
+  in_order <- 
+    elt %>% 
+    mutate(obs_num = row_number()) %>% 
+    ggplot(
+      aes(
+        obs_num, SONAR, 
+        color = as.factor(flag)
+      )
+    ) +
+    geom_point(show.legend = F) +
+    scale_color_manual(
+      values = c("black", scales::hue_pal()(5))
+    )
+  
+  path <- basename(elt$fn[1]) %>% 
+    str_remove(".csv$") %>% 
+    paste0("/PLOT_ERROR_", ., ".pdf")
+  
+  library(patchwork)
+  ggsave(
+    file.path(getwd(), "diagnostic_plots", path), 
+    labeled + in_order,
+    width = 10, height = 8
+  )
+  
+  path
+}
 extract_loop <- function(trk) {
   head_tail_idx <- seq.int(nrow(trk))
   head_tail_idx <- between(
@@ -251,34 +329,72 @@ label_looped_scan <- function(lps, buffer_size) {
   
   bf <- st_buffer(ctr, buffer_size)
   
-  lps[["track"]] %>%
+  labeled_loops <- 
+    lps[["track"]] %>%
     mutate(
       flag = st_intersects(geometry, bf, sparse = F),
       flag = as.numeric(flag[,1])
       )
+  
+  jumps <- lps[["track"]] %>% 
+    pull(geometry) %>% 
+    st_distance(lead(.), by_element = T)
+  
+  jump_flag <- jumps[jumps > units::set_units(2.5, "m")]
+
+  if (length(na.omit(jump_flag))) {
+    pathname <- plot_onfarm_error(
+      labeled_loops, 
+      lps[["track"]][jumps > units::set_units(2.5, "m") & !is.na(jumps), ]
+      )
+    stop(
+      "GPS drifting?\n",
+      "See file:\n",
+      pathname, "\n"
+    )
+  }
+
+  if (nrow(filter(labeled_loops, flag == 1)) <= 5) {
+    pathname <- plot_onfarm_error(
+      labeled_loops, 
+      lps[["track"]][jumps > units::set_units(2.5, "m") & !is.na(jumps), ]
+    )
+    stop(
+      "Malformed loop!\n",
+      "See file:\n",
+      pathname, "\n"
+    )
+  }
+  
+  labeled_loops
 }
 
 
 onfarm_loop_attempts <- 
   purrr::map(scans, "result") %>% 
   purrr::compact() %>% 
-  purrr::keep(~stringr::str_detect(.x$fn[1], "_onfarm_")) %>% 
+  purrr::keep(~stringr::str_detect(.x$fn[1], "_onfarm_")) %>%  
   purrr::map(purrr::safely(extract_loop))
 
 onfarm_loops <- 
   onfarm_loop_attempts %>% 
   purrr::map("result") %>% 
   purrr::compact() %>%
-  purrr::map(~label_looped_scan(.x, 5)) 
+  purrr::map(
+    ~purrr::safely(label_looped_scan)(.x, 5)
+    ) 
     # 5 meter radius from center of largest loop
 
 onfarm_loop_attempts %>% 
   purrr::map("error") %>% 
   purrr::compact()
 
+onfarm_loops %>% 
+  purrr::map("error") 
+
 plot_onfarm <- function(elt) {
   readline("Hit Enter to continue:")
-  
+
   message(
       cli::col_green("File: "),
       cli::col_blue(basename(elt$fn[1]))
@@ -320,7 +436,9 @@ plot_onfarm <- function(elt) {
 }
 
 purrr::walk(
-  onfarm_loops,
+  onfarm_loops %>% 
+    purrr::map("result") %>% 
+    purrr::compact(),
   plot_onfarm
 )
 
@@ -404,6 +522,12 @@ plot_ce_error <- function(elt, walk_order) {
       collapse = ""
     )
   
+  jumps <- elt %>%
+    pull(geometry) %>%
+    st_distance(lead(.), by_element = T)
+  
+  jump_set <- elt[jumps > units::set_units(2.5, "m"), ]
+  
   labeled <- 
     ggplot(elt, aes(color = as.factor(paste(flag, plot_id, sep = "_")))) + 
     geom_sf(data = sq, color = NA, fill = NA) +
@@ -416,6 +540,7 @@ plot_ce_error <- function(elt, walk_order) {
       fun.geometry = sf::st_centroid
     ) +
     geom_sf() +
+    geom_sf(data = jump_set, shape = 0, size = 4, show.legend = F) +
     labs(
       color = "Plot Order",
       title = glue::glue("Should be:\n{paste(walk_order[-1], collapse = '\n')}")
@@ -434,7 +559,7 @@ plot_ce_error <- function(elt, walk_order) {
     mutate(obs_num = row_number()) %>% 
     ggplot(
       aes(
-        obs_num, LIDAR, 
+        obs_num, SONAR, 
         color = as.factor(paste(flag, plot_id, sep = "_"))
       )
     ) +
@@ -498,9 +623,11 @@ extract_ce_plots <- function(dat, n_plots) {
   } # TODO: fixed, but ugly. Will give 1-5 for A, C and 5-1 for B, D
   
   # TODO: is 0 the same as 999 in the data?
+  # Decided SONAR is more reliably 999 than LIDAR, 
+  #   so we don't have to worry about 0s
   ret <- dat %>% 
     mutate(
-      flag = RcppRoll::roll_max(LIDAR, 10, fill = NA),
+      flag = RcppRoll::roll_max(SONAR, 10, fill = NA),
       flag = runs_to_plots(flag < 998, n_plots) 
     )
 
@@ -519,6 +646,21 @@ extract_ce_plots <- function(dat, n_plots) {
       remove = F
     )
   
+  jumps <- labeled_scan %>%
+    pull(geometry) %>%
+    st_distance(lead(.), by_element = T)
+
+  jump_flag <- na.omit(jumps[jumps > units::set_units(2.5, "m")])
+
+  if (length(jump_flag)) {
+    pathname <- 
+      plot_ce_error(labeled_scan, walk_order$plot_id)
+    stop(
+      "GPS drifting?\n",
+      "See file:\n",
+      pathname, "\n"
+    )
+  }
 
   
   if (!plot_check) {
@@ -539,8 +681,7 @@ extract_ce_plots <- function(dat, n_plots) {
   
 }
 
-# TODO: move error plots to another folder
-# 
+
 ce1_plots <- 
   purrr::map(scans, "result") %>% 
   purrr::compact() %>% 
@@ -602,6 +743,8 @@ ce2_plots %>%
 
 
 onfarm_loops %>% 
+  purrr::map("result") %>% 
+  purrr::compact() %>% 
   purrr::map(
     ~{
       fn <- basename(.x$fn[1]) %>% 
