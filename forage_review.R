@@ -1,5 +1,6 @@
 library(shiny)
 library(shinydashboard)
+library(dplyr)
 
 
 forage_make_sidebar <- function(x, input) {
@@ -24,19 +25,30 @@ forage_make_tabs <- function(b, a) {
     function(step, err, uuid) {
       tabItem(
         tabName = uuid,
-        h2(uuid),
-        h3(strong("Step:"), step),
-        h4(pre(err, style = "white-space: pre-wrap;")),
+        h2("Forage box: ", uuid),
+
         selectInput(
           uuid, 
           label = "Resolve?", 
           choices = c("", "Keep checking", "This form cannot be saved")
         ),
-        pre(
-          purrr::keep(a, ~.x[["_uuid"]] == uuid)[[1]] %>% 
-            jsonlite::toJSON(pretty = T, auto_unbox = T) %>% 
-            code(class = 'language-javascript', .noWS = "before"),
-          .noWS = "before"
+        tags$button(
+          "COPY",
+          class = "btn",
+          "data-clipboard-target" = paste0("#target_", uuid)
+          ),
+        div(
+          id = paste0("target_", uuid),
+          h3(strong("Step:"), step),
+          h4(pre(paste0("`", err, "`"), style = "white-space: pre-wrap;")),
+          span("```json", style = "opacity: 0;"),
+          pre(
+            purrr::keep(a, ~.x[["_uuid"]] == uuid)[[1]] %>% 
+              jsonlite::toJSON(pretty = T, auto_unbox = T) %>% 
+              code(class = 'language-javascript', .noWS = "before"),
+            .noWS = "before"
+          ),
+          span("```", style = "opacity: 0;")
         )
       )
     }
@@ -52,9 +64,12 @@ forage_review <- function(bad_subs, all_subs) {
   tabs <- forage_make_tabs(bad_subs, all_subs) %>% 
     purrr::lift_dl(tabItems)(.) %>% 
     dashboardBody(
-      tags$head(tags$script(src = "https://cdnjs.cloudflare.com/ajax/libs/prism/1.27.0/prism.min.js")),
+      tags$head(
+        tags$script(src = "https://cdnjs.cloudflare.com/ajax/libs/prism/1.27.0/prism.min.js"),
+        tags$script(src = "https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/2.0.11/clipboard.min.js"),
+      ),
       tags$link(rel = "stylesheet", href = "https://cdnjs.cloudflare.com/ajax/libs/prism/1.27.0/themes/prism.css"),
-      tags$script('Prism.highlightAll();')
+      tags$script("Prism.highlightAll(); new ClipboardJS('.btn');")
       )
 
   ui <- dashboardPage(
