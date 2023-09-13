@@ -86,7 +86,8 @@ scans <- dir(
   )
 
 # labeled blob to datum ----
-
+# TODO remove SONAR and LIDAR where it's more than 2.5m
+#   before removing other outliers
 track_rm_outliers <- function(trk) {
 
   trk_clean <- 
