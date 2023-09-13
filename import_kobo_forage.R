@@ -59,7 +59,9 @@ known_bad_UUIDs <- c(
   "50f2717f-f1db-4c58-bb00-1c42056220f3",
   "9a15301e-8abd-4f58-994c-417c84492e3b",
   "a93dcf88-8f41-415c-9f0f-2fdcf9c22f1c",
-  "af1cc7d5-ee79-4ced-ab6f-dbabd49aeb94"
+  "af1cc7d5-ee79-4ced-ab6f-dbabd49aeb94",
+  "8d5c8d35-ae98-4921-8347-ebb7a2514bd3",
+  "41923da5-e69a-4b07-9ee0-4a85e0328790"
 )
 
 
