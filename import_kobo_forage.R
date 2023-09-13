@@ -570,11 +570,14 @@ forage_download <- function(dl_url, file_nm) {
       res_size == 0 | 
       local_size != res_size
   ) {
-    stop(
+    # TODO: auto delete zero size files, don't make an error
+    # Fixed?
+    message(
       "Incompatible sizes: response, ", 
       res_size, "; local, ", local_size,
       "; ", file_nm
       )
+    return("")
   }
   
   return(local_fn)
@@ -685,6 +688,7 @@ raw_forms_local_to_check <-
 blobs_pushed <- 
   raw_forms_local_to_push %>% 
   pull(local_fn) %>% 
+  stringr::str_subset("^$", negate = T) %>% 
   purrr::set_names() %>% 
   purrr::map(
     purrr::safely(forage_upload),
