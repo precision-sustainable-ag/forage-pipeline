@@ -1,21 +1,16 @@
 library(dplyr)
 library(sf)
 library(ggplot2)
+library(patchwork)
+library(purrr)
+library(stringr)
 
-unlink("plots_with_labels", recursive = T)
-dir.create("plots_with_labels")
-unlink("blobs_without_plot_labels", recursive = T)
-dir.create("blobs_without_plot_labels")
+# unlink("plots_with_labels", recursive = T)
+# dir.create("plots_with_labels")
+# unlink("blobs_without_plot_labels", recursive = T)
+# dir.create("blobs_without_plot_labels")
 dir.create("diagnostic_plots")
-
-hex_rx <- function(...) {
-  n <- c(...)
-  hex <- "[a-fA-F0-9]"
-  glue::glue("{hex}{{{n}}}") %>% 
-    paste0(collapse = "-")
-}
-
-uuid_rx <- hex_rx(8, 4, 4, 4, 12)  
+dir.create("tracks_with_drift")
 
 make_square <- function(obj) {
   b <- st_bbox(obj)
@@ -36,174 +31,41 @@ filter_uuids <- function(x, targets) {
   x[!(x_uuid %in% targets)]
 }
 
-
-
-# Authenticate: ----
-source("secret.R")
-
-
-
-# Fetch: ----
-blob_ctr <- 
-  AzureStor::list_blob_containers(
-    sas_endpoint, 
-    sas = sas_token
-  )[["landing-zone"]] 
-
-existing_blobs <- 
-  AzureStor::list_blobs(
-    blob_ctr, info = "name"
-  )
-
-labeled_blobs <- 
-  AzureStor::list_blobs(
-    AzureStor::list_blob_containers(
-      sas_endpoint, 
-      sas = sas_token
-    )[["01-plots-with-labels"]], 
-    info = "name"
-  ) %>% 
-  stringr::str_extract(uuid_rx) %>% 
-  unique()
-
-
-blob_csvs <- 
-  stringr::str_subset(
-    existing_blobs,
-    glue::glue("{uuid_rx}\\.csv")
-  ) %>% 
-  stringr::str_subset(
-    "_ce1_|_ce2_|_onfarm_"
-  ) %>% 
-  filter_uuids(labeled_blobs)
-
-
-AzureStor::multidownload_blob(
-  blob_ctr,
-  blob_csvs,
-  file.path("blobs_without_plot_labels", blob_csvs),
-  overwrite = T
-)
-
-# Extract plot locations: ----
-parse_box_from_dict <- function(fn) {
-  lns <- readr::read_lines(fn)
-  lns <- lns[str_detect(lns, ",")]
-  
-  if (!length(lns)) { stop("Empty scanfile: ", fn) }
-  
-  if (!str_detect(lns[1], "LAT")) { stop("Missing GPS: ", fn) }
-
-  sensor_type <- str_extract(head(lns), "ASC-210|PHENOM_ACS435") %>% na.omit()
-  has_voltage <- any(str_detect(head(lns), "INT_VOLT|EXT_VOLT"))
-  
-  if (sensor_type == "PHENOM_ACS435" & has_voltage) {
-    hdr <-
-      list(
-        c("LAT", "LNG", "COURSE", "SPEED", "ELEV", "HDOP", "FIX", 
-          "UTC_DATE", "UTC_TIME", "INT_VOLT", "EXT_VOLT", "SENSOR_ADDR", 
-          "NDVI", "3DNDVI", "NIR", "R"), # "SENSOR_TYPE:PHENOM_ACS435"
-        c("LAT", "LNG", "COURSE", "SPEED", "ELEV", "HDOP", "FIX", 
-          "UTC_DATE",  "UTC_TIME", "INT_VOLT", "EXT_VOLT", "SENSOR_ADDR", 
-          "SONAR", "LIDAR", "ISP1", "ISP2") # "SENSOR_TYPE:PHENOM_DAS44X"
-      )
-    
-    addr_pos <- 12
-  } else if (sensor_type == "ASC-210" & has_voltage) {
-    hdr <- 
-      list(
-        c("LAT", "LNG", "COURSE", "SPEED", "ELEV", "HDOP", "FIX",
-          "UTC_DATE", "UTC_TIME", "INT_VOLT", "EXT_VOLT", "SENSOR_ADDR", 
-          "NDVI", "3DNDVI", "NIR", "R"), # SENSOR_TYPE:ASC-210
-        c("LAT", "LNG", "COURSE", "SPEED", "ELEV", "HDOP", "FIX",
-          "UTC_DATE", "UTC_TIME", "INT_VOLT", "EXT_VOLT", "SENSOR_ADDR",
-          "SONAR", "LIDAR", "ISP1", "ISP2") # SENSOR_TYPE:ASC-210
-      )
-    
-    addr_pos <- 12
-  } else if (sensor_type == "ASC-210" & !has_voltage) {
-    hdr <- 
-      list(
-        c("LAT", "LNG", "COURSE", "SPEED", "ELEV", "HDOP", "FIX",
-          "UTC_DATE", "UTC_TIME", "SENSOR_ADDR", 
-          "NDVI", "3DNDVI", "NIR", "R"), # SENSOR_TYPE:ASC-210
-        c("LAT", "LNG", "COURSE", "SPEED", "ELEV", "HDOP", "FIX",
-          "UTC_DATE", "UTC_TIME", "SENSOR_ADDR",
-          "SONAR", "LIDAR", "ISP1", "ISP2") # SENSOR_TYPE:ASC-210
-      )
-    
-    addr_pos <- 10
-    
-  } else if (sensor_type == "PHENOM_ACS435" & !has_voltage) {
-    hdr <- 
-      list(
-        c("LAT", "LNG", "COURSE", "SPEED", "ELEV", "HDOP", "FIX",
-          "UTC_DATE", "UTC_TIME", "SENSOR_ADDR", 
-          "NDVI", "3DNDVI", "NIR", "R"), # SENSOR_TYPE:PHENOM_ACS435
-        c("LAT", "LNG", "COURSE", "SPEED", "ELEV", "HDOP", "FIX",
-          "UTC_DATE", "UTC_TIME", "SENSOR_ADDR",
-          "SONAR", "LIDAR", "ISP1", "ISP2") # SENSOR_TYPE:PHENOM_DAS44X
-      )
-    
-    addr_pos <- 10
-    
-  } else {
-    stop("Unknown sensor type: ", fn)
-  }
-
-  lns <- lns[str_detect(lns, "^[-+0-9]")]
-
-  trailing_flag <- 
-    all(str_detect(lns, ",$")) & 
-    length(hdr[[1]]) == str_count(tail(lns, 1), ",")
-
-  if (trailing_flag) {
-    lns <- str_remove(lns, ",$")
-  }
-    
-  data_lns <- 
-    lns %>% 
-    str_split(",")
-  
-  data_lns_idx <- purrr::map_dbl(
-    data_lns,
-    ~.x[addr_pos] %>% as.numeric()
-  )
-  
-  data_dfs <- purrr::map2(
-    data_lns, data_lns_idx,
-    ~set_names(.x, hdr[[.y]]) %>% 
-      bind_rows()
-  )
-  
-  dfs_list <- split(data_dfs, data_lns_idx)
-  
-  ret <- full_join(
-    bind_rows(dfs_list[[1]]), 
-    bind_rows(dfs_list[[2]]),
-    by = c(
-      "LAT", "LNG", "COURSE", "SPEED", "ELEV", "HDOP", "FIX",
-      "UTC_DATE", "UTC_TIME"
-    ),
-    suffix = c("__01", "__02")
-  ) %>% 
-    mutate(fn = fn) %>% 
-    mutate_all(readr::parse_guess) %>% 
-    select(-SENSOR_ADDR__01, -SENSOR_ADDR__02)
-  
-  
-  ret
+replace_ext <- function(fn, ext) {
+  paste0(tools::file_path_sans_ext(fn), ".", ext)
 }
 
-scans <- file.path(
-  "blobs_without_plot_labels",
-  blob_csvs
-) %>% 
-  purrr::map(
-    ~purrr::safely(parse_box_from_dict)(.x)
+mark_drift <- function(fn) {
+  dest <- file.path("tracks_with_drift", fn)
+  
+  if (file.exists(dest)) {
+    return(NULL)
+  }
+  
+  file.copy(
+    file.path("tracks_without_labels", fn),
+    file.path("tracks_with_drift", fn)
   )
+  
+  return(fn)
+  # check if it's already in the drift folder
+  # move it into the drift folder
+  # return something to check?
+  # 
+  # problem: the parsed blobs before labeling need to be stored
+  # otherwise this doesn't work right
+}
 
-purrr::map(scans, "error") %>% purrr::compact()
+track_files <- 
+  dir(
+    "tracks_without_labels",
+    full.names = T,
+    pattern = "geojson"
+    ) %>% 
+  purrr::map(purrr::safely(sf::read_sf))
+
+# todo: replace every "scans" with "track_files"
+# todo: don't make SF obj within this script
 
 # _Onfarm: ----
 plot_onfarm_error <- function(elt, jmps) {
@@ -239,11 +101,7 @@ plot_onfarm_error <- function(elt, jmps) {
       data = jmps, 
       shape = 0, size = 4, 
       show.legend = F, inherit.aes = F
-      ) +
-    # scale_color_manual(
-    #   #values = c("black", scales::hue_pal()(5)),
-    #   guide = guide_legend(override.aes = list(size = 8))
-    # ) +
+    ) +
     labs(
       title = paste0("Number of points: ", nrow(filter(elt, flag == 1)))
     ) +
@@ -270,7 +128,6 @@ plot_onfarm_error <- function(elt, jmps) {
     str_remove(".csv$") %>% 
     paste0("/PLOT_ERROR_", ., ".pdf")
   
-  library(patchwork)
   ggsave(
     file.path(getwd(), "diagnostic_plots", path), 
     labeled + in_order,
@@ -279,6 +136,8 @@ plot_onfarm_error <- function(elt, jmps) {
   
   path
 }
+
+
 extract_loop <- function(trk) {
   head_tail_idx <- seq.int(nrow(trk))
   head_tail_idx <- between(
@@ -288,12 +147,7 @@ extract_loop <- function(trk) {
   )
   
   trk_sf <- 
-    st_as_sf(
-      trk[head_tail_idx, ], 
-      coords = c("LNG","LAT"), 
-      crs = 4326
-      ) %>% 
-    st_combine() %>% 
+    st_combine(trk) %>% 
     st_cast("LINESTRING")
   
   ret <- st_intersection(
@@ -310,12 +164,7 @@ extract_loop <- function(trk) {
   
   list(
     scan = trk,
-    track = st_as_sf(
-      trk, 
-      coords = c("LNG","LAT"), 
-      crs = 4326,
-      remove = F
-    ),
+    track = trk,
     loops = ret
   )
 }
@@ -325,7 +174,7 @@ label_looped_scan <- function(lps, buffer_size) {
     lps[["loops"]] %>% 
       arrange(desc(sz)) %>%
       slice(1)
-    )
+  )
   
   bf <- st_buffer(ctr, buffer_size)
   
@@ -334,18 +183,24 @@ label_looped_scan <- function(lps, buffer_size) {
     mutate(
       flag = st_intersects(geometry, bf, sparse = F),
       flag = as.numeric(flag[,1])
-      )
+    )
   
   jumps <- lps[["track"]] %>% 
     pull(geometry) %>% 
     st_distance(lead(.), by_element = T)
   
   jump_flag <- jumps[jumps > units::set_units(2.5, "m")]
-
+  
   if (length(na.omit(jump_flag))) {
     pathname <- plot_onfarm_error(
       labeled_loops, 
       lps[["track"]][jumps > units::set_units(2.5, "m") & !is.na(jumps), ]
+    )
+    browser()
+    # move the file
+    mark_drift(
+      basename(labeled_loops$fn[1]) %>% 
+        replace_ext("geojson")
       )
     stop(
       "GPS drifting?\n",
@@ -353,7 +208,7 @@ label_looped_scan <- function(lps, buffer_size) {
       pathname, "\n"
     )
   }
-
+  
   if (nrow(filter(labeled_loops, flag == 1)) <= 5) {
     pathname <- plot_onfarm_error(
       labeled_loops, 
@@ -371,7 +226,7 @@ label_looped_scan <- function(lps, buffer_size) {
 
 
 onfarm_loop_attempts <- 
-  purrr::map(scans, "result") %>% 
+  purrr::map(track_files, "result") %>% 
   purrr::compact() %>% 
   purrr::keep(~stringr::str_detect(.x$fn[1], "_onfarm_")) %>%  
   purrr::map(purrr::safely(extract_loop))
@@ -382,8 +237,8 @@ onfarm_loops <-
   purrr::compact() %>%
   purrr::map(
     ~purrr::safely(label_looped_scan)(.x, 5)
-    ) 
-    # 5 meter radius from center of largest loop
+  ) 
+# 5 meter radius from center of largest loop
 
 onfarm_loop_attempts %>% 
   purrr::map("error") %>% 
@@ -392,13 +247,15 @@ onfarm_loop_attempts %>%
 onfarm_loops %>% 
   purrr::map("error") 
 
-plot_onfarm <- function(elt) {
-  readline("Hit Enter to continue:")
-
-  message(
+plot_onfarm <- function(elt, save = F) {
+  if (!save) {
+    readline("Hit Enter to continue:")
+    
+    message(
       cli::col_green("File: "),
       cli::col_blue(basename(elt$fn[1]))
     )
+  }
   
   sq <- make_square(elt) %>% st_as_sfc()
   bb <- elt %>% 
@@ -419,20 +276,47 @@ plot_onfarm <- function(elt) {
       ifelse(vec[1] <= 0, "r", "l"),
       collapse = ""
     )
-
-  print(
+  
+  labeled <- 
     ggplot(elt, aes(color = as.factor(flag))) + 
-      geom_sf(data = sq, color = NA, fill = NA) +
-      geom_sf(show.legend = F) +
-      labs(
-        title = paste0("Number of points: ", nrow(filter(elt, flag == 1))),
-        subtitle = paste0("Area of bbox: ", format(st_area(bb)))
-      ) +
-      ggspatial::annotation_scale(
-        location = loc,
-        width_hint = 0.5
+    geom_sf(data = sq, color = NA, fill = NA) +
+    geom_sf(show.legend = F) +
+    labs(
+      title = paste0("Number of points: ", nrow(filter(elt, flag == 1))),
+      subtitle = paste0("Area of bbox: ", format(st_area(bb)))
+    ) +
+    ggspatial::annotation_scale(
+      location = loc,
+      width_hint = 0.5
+    )
+  
+  in_order <- 
+    elt %>% 
+    mutate(obs_num = row_number()) %>% 
+    ggplot(
+      aes(
+        obs_num, SONAR, 
+        color = as.factor(flag)
       )
-  )
+    ) +
+    geom_point(show.legend = F) +
+    scale_color_manual(
+      values = c("black", scales::hue_pal()(5))
+    )
+  
+  if (save) {
+    path <- basename(elt$fn[1]) %>% 
+      stringr::str_remove(".csv$") %>% 
+      paste0(".pdf")
+    
+    ggsave(
+      file.path(getwd(), "preview_maps", path), 
+      labeled + in_order,
+      width = 10, height = 8
+    )  
+  } else {
+    print(labeled)
+  }
 }
 
 purrr::walk(
@@ -440,6 +324,13 @@ purrr::walk(
     purrr::map("result") %>% 
     purrr::compact(),
   plot_onfarm
+)
+
+purrr::walk(
+  onfarm_loops %>% 
+    purrr::map("result") %>% 
+    purrr::compact(),
+  ~plot_onfarm(.x, save = T)
 )
 
 # _CE1: ----
@@ -478,29 +369,46 @@ plot_ce <- function(elt) {
       collapse = ""
     )
   
-  print(
+  labeled <- 
     ggplot(elt, aes(color = as.factor(paste(flag, plot_id, sep = "_")))) + 
-      geom_sf(data = sq, color = NA, fill = NA) +
-      geom_sf_label(
-        data = function(d) 
-          rbind("Start" = head(d, 1), "End" = tail(d, 1)) %>% 
-          mutate(label = c("Start", "End")),
-        aes(label = label), color = "black",
-        hjust = "inward", vjust = "inward",
-        fun.geometry = sf::st_centroid
-      ) +
-      geom_sf() +
-      labs(
-        color = "Plot Order"
-      ) +
-      scale_color_manual(
-        values = c("grey80", scales::hue_pal()(5)),
-        guide = guide_legend(override.aes = list(size = 8))
-      ) +
-      ggspatial::annotation_scale(
-        location = loc,
-        width_hint = 0.5
+    geom_sf(data = sq, color = NA, fill = NA) +
+    geom_sf_label(
+      data = function(d) 
+        rbind("Start" = head(d, 1), "End" = tail(d, 1)) %>% 
+        mutate(label = c("Start", "End")),
+      aes(label = label), color = "black",
+      hjust = "inward", vjust = "inward",
+      fun.geometry = sf::st_centroid
+    ) +
+    geom_sf() +
+    labs(
+      color = "Plot Order"
+    ) +
+    scale_color_manual(
+      values = c("grey80", scales::hue_pal()(5)),
+      guide = guide_legend(override.aes = list(size = 8))
+    ) +
+    ggspatial::annotation_scale(
+      location = loc,
+      width_hint = 0.5
+    )
+  
+  in_order <- 
+    elt %>% 
+    mutate(obs_num = row_number()) %>% 
+    ggplot(
+      aes(
+        obs_num, SONAR, 
+        color = as.factor(paste(flag, plot_id, sep = "_"))
       )
+    ) +
+    geom_point(show.legend = F) +
+    scale_color_manual(
+      values = c("black", scales::hue_pal()(5))
+    )
+  
+  print(
+    labeled + in_order
   )
 }
 
@@ -572,7 +480,6 @@ plot_ce_error <- function(elt, walk_order) {
     str_remove(".csv$") %>% 
     paste0("/PLOT_ERROR_", ., ".pdf")
   
-  library(patchwork)
   ggsave(
     file.path(getwd(), "diagnostic_plots", path), 
     labeled + in_order,
@@ -590,7 +497,7 @@ extract_ce_plots <- function(dat, n_plots) {
       c("boxtype", "proj", "location", "timing", "species",
         "walk_order", "scan", "scan_date", "uuid")
     )
-
+  
   if (str_detect(meta[["walk_order"]], "walkB|walkD")) {
     reverse_flag = T
   } else { reverse_flag = F }
@@ -600,8 +507,8 @@ extract_ce_plots <- function(dat, n_plots) {
       plot_id = c(
         "alley",
         meta[["walk_order"]] %>% 
-        str_split("~", simplify = T) %>% 
-        as.vector()
+          str_split("~", simplify = T) %>% 
+          as.vector()
       )
     ) %>% 
     slice(-2) %>%             # remove "rep" or "walk"
@@ -618,7 +525,7 @@ extract_ce_plots <- function(dat, n_plots) {
           reverse_flag, 
           c(0, rev(row_number())[-1]) 
           # generates 0,1:5, then 0,5:1, then 0,4:1
-          )
+        )
       )
   } # TODO: fixed, but ugly. Will give 1-5 for A, C and 5-1 for B, D
   
@@ -630,38 +537,39 @@ extract_ce_plots <- function(dat, n_plots) {
       flag = RcppRoll::roll_max(SONAR, 10, fill = NA),
       flag = runs_to_plots(flag < 998, n_plots) 
     )
-
+  
   plot_check <- identical(
     sort(unique(ret$flag)), 
     walk_order$flag
-    )
+  )
   
   labeled_scan <- 
     left_join(
-    ret, walk_order
-  ) %>% 
-    st_as_sf(
-      coords = c("LNG","LAT"), 
-      crs = 4326,
-      remove = F
-    )
+      ret, walk_order
+    ) 
   
   jumps <- labeled_scan %>%
     pull(geometry) %>%
     st_distance(lead(.), by_element = T)
-
+  
   jump_flag <- na.omit(jumps[jumps > units::set_units(2.5, "m")])
-
+  
   if (length(jump_flag)) {
     pathname <- 
       plot_ce_error(labeled_scan, walk_order$plot_id)
+    # browser()
+    # move the file
+    mark_drift(
+      basename(dat$fn[1]) %>% 
+        replace_ext("geojson")
+      )
     stop(
       "GPS drifting?\n",
       "See file:\n",
       pathname, "\n"
     )
   }
-
+  
   
   if (!plot_check) {
     pathname <- 
@@ -673,8 +581,8 @@ extract_ce_plots <- function(dat, n_plots) {
       jsonlite::toJSON(
         anti_join(walk_order, ret, by = "flag") %>%
           mutate(file = basename(ret$fn[1]))
-        )
       )
+    )
   }
   
   labeled_scan
@@ -683,13 +591,13 @@ extract_ce_plots <- function(dat, n_plots) {
 
 
 ce1_plots <- 
-  purrr::map(scans, "result") %>% 
+  purrr::map(track_files, "result") %>% 
   purrr::compact() %>% 
   purrr::keep(~stringr::str_detect(.x$fn[1], "_ce1_")) %>% 
   purrr::map(purrr::safely(extract_ce_plots), n_plots = 4)
 
 ce2_plots <- 
-  purrr::map(scans, "result") %>% 
+  purrr::map(track_files, "result") %>% 
   purrr::compact() %>% 
   purrr::keep(~stringr::str_detect(.x$fn[1], "_ce2_")) %>% 
   purrr::map(purrr::safely(extract_ce_plots), n_plots = 5)
@@ -735,7 +643,7 @@ ce2_plots %>%
   purrr::compact() %>% 
   .[[5]] %>%
   ggplot(aes(LNG, LAT, shape = as.factor(rep))) +
-    geom_point() +
+  geom_point() +
   geom_point(data = function(d) slice(d, 1), size = 10)
 
 
@@ -760,7 +668,7 @@ ce1_plots %>%
   purrr::map(
     ~{
       fn <- basename(.x$fn[1]) %>% 
-        str_replace(".csv$", ".geojson")
+        replace_ext("geojson")
       
       sf::st_write(.x, file.path("plots_with_labels", fn))
     }
@@ -772,11 +680,33 @@ ce2_plots %>%
   purrr::map(
     ~{
       fn <- basename(.x$fn[1]) %>% 
-        str_replace(".csv$", ".geojson")
+        replace_ext("geojson")
       
       sf::st_write(.x, file.path("plots_with_labels", fn))
     }
   )
+
+## Export ----
+
+drift_ctr <- AzureStor::list_blob_containers(
+  sas_endpoint, 
+  sas = sas_token
+)[["00a-tracks-with-drift"]] 
+
+drifting_blobs_pushed <- 
+  dir(
+    "tracks_with_drift",
+    full.names = T,
+    pattern = "geojson"
+  ) %>%
+  purrr::map(
+    ~purrr::safely(forage_upload)(.x, drift_ctr),
+  )
+
+drifting_blobs_pushed %>% 
+  purrr::map("error") %>% 
+  purrr::compact()
+
 
 lbl_ctr <- AzureStor::list_blob_containers(
   sas_endpoint, 
