@@ -110,6 +110,13 @@ forage_submissions_response_list <-
     )
   )
 
+kobo_statuses <- purrr::map_dbl(
+  forage_submissions_response_list,
+  httr::status_code
+)
+
+stopifnot(all(kobo_statuses == 200))
+
 forage_submissions <- 
   purrr::map(
     forage_submissions_response_list,
