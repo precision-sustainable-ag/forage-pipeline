@@ -61,7 +61,7 @@ blob_csvs <-
     glue::glue("{uuid_rx}\\.csv")
   ) %>% 
   stringr::str_subset(
-    "_ce1_|_ce2_|_onfarm_"
+    "_ce1_|_ce2_|_onfarm_|_strip_"
   ) %>% 
   filter_uuids(labeled_blobs)
 
