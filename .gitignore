@@ -9,4 +9,11 @@ blobs_without_plot_labels/
 plots_with_labels/
 blobs_without_datum/
 plots_with_datum/
+blobs_without_summary/
+diagnostic_plots/
+forage_blobs/
+plots_with_summary/
+preview_maps/
+tracks_with_drift/
+tracks_without_labels/
 *.pdf
