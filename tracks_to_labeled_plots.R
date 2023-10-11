@@ -5,6 +5,8 @@ library(patchwork)
 library(purrr)
 library(stringr)
 
+source("secret.R")
+
 # unlink("plots_with_labels", recursive = T)
 # dir.create("plots_with_labels")
 # unlink("blobs_without_plot_labels", recursive = T)
@@ -48,12 +50,6 @@ mark_drift <- function(fn) {
   )
   
   return(fn)
-  # check if it's already in the drift folder
-  # move it into the drift folder
-  # return something to check?
-  # 
-  # problem: the parsed blobs before labeling need to be stored
-  # otherwise this doesn't work right
 }
 
 track_files <- 
@@ -64,8 +60,8 @@ track_files <-
     ) %>% 
   purrr::map(purrr::safely(sf::read_sf))
 
-# todo: replace every "scans" with "track_files"
-# todo: don't make SF obj within this script
+
+# TODO: if the file is _SE_ then override the jumps flag
 
 # _Onfarm: ----
 plot_onfarm_error <- function(elt, jmps) {
@@ -173,7 +169,8 @@ label_looped_scan <- function(lps, buffer_size) {
   ctr <- st_centroid(
     lps[["loops"]] %>% 
       arrange(desc(sz)) %>%
-      slice(1)
+      slice(1) %>% 
+      st_geometry()
   )
   
   bf <- st_buffer(ctr, buffer_size)
@@ -196,7 +193,7 @@ label_looped_scan <- function(lps, buffer_size) {
       labeled_loops, 
       lps[["track"]][jumps > units::set_units(2.5, "m") & !is.na(jumps), ]
     )
-    browser()
+
     # move the file
     mark_drift(
       basename(labeled_loops$fn[1]) %>% 
@@ -245,7 +242,8 @@ onfarm_loop_attempts %>%
   purrr::compact()
 
 onfarm_loops %>% 
-  purrr::map("error") 
+  purrr::map("error") %>% 
+  purrr::compact()
 
 plot_onfarm <- function(elt, save = F) {
   if (!save) {
@@ -645,6 +643,15 @@ ce2_plots %>%
   ggplot(aes(LNG, LAT, shape = as.factor(rep))) +
   geom_point() +
   geom_point(data = function(d) slice(d, 1), size = 10)
+
+
+# Strip: ----
+
+# Fetch polys
+# Fetch points
+# Join
+#   plot id: matching the point file, 0 in the plot, -1 outside any plot
+# Plot
 
 
 # Export: ----
