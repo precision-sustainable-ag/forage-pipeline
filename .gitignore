@@ -20,4 +20,4 @@ tracks_without_labels/
 *.pdf
 
 python/.env
-python/notebooks/.ipynb_checkpoints
+python/notebooks
