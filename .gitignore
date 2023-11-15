@@ -18,3 +18,6 @@ preview_maps/
 tracks_with_drift/
 tracks_without_labels/
 *.pdf
+
+python/.env
+python/notebooks
