@@ -5,7 +5,7 @@
 `virtualenv -p python3 .venv`
 - activate the python env by running this:
 
-`source .venv/bin/activatesource .venv/bin/activate`
+`source .venv/bin/activate`
 - install required packages by running:
 
 `pip install -r requirements.txt`
