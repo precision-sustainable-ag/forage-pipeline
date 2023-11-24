@@ -128,20 +128,20 @@ scan_summaries <-
 purrr::map(scan_summaries, "error") %>% 
   purrr::compact()
 
+#TODO delete existing blobs and write csvs instead
 # upload ----
 scan_summaries %>% 
   purrr::map("result") %>% 
   purrr::compact() %>% 
   purrr::map(
     ~{
-      fn <- basename(.x$fn[1]) %>% 
-        replace_ext("geojson")
+      fn <- basename(.x$fn[1])
       
       if (is.na(fn)) { browser() }
       
-      sf::st_write(
+      readr::write_csv(
         .x, file.path("plots_with_summary", fn),
-        delete_dsn = T
+        append = F
       )
     }
   )
@@ -157,7 +157,7 @@ summarized_plots_pushed <-
   dir(
     "plots_with_summary",
     full.names = T,
-    pattern = "geojson"
+    pattern = "csv"
   ) %>%
   purrr::map(
     ~purrr::safely(forage_upload)(.x, sum_ctr),
