@@ -46,6 +46,8 @@ def read_blob_to_pandas():
     filtered_blobs = []
     for blob in blob_list:
         fname = blob.name
+        if not 'onfarm' in fname:
+            continue
         box_name, experiment_type, site_code, timing, species, replicate, f_type_indic, date_str, uuid = fname.split(".")[0].split("_")
         timestamp = datetime.strptime(date_str, "%Y%m%d")
         if experiment_type == "onfarm" and timing == "biomass":
