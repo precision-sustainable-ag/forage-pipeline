@@ -4,7 +4,8 @@ import requests
 import pandas as pd
 import numpy as np
 from helpers import ONFARM_KEY, CREDENTIAL, ACCOUNT_URL
-from azure.storage.blob import ContainerClient
+from azure.storage.blob import ContainerClient, ContentSettings
+
 
 #### read dite data from azure blob ####
 df = read_blob_to_pandas()
@@ -34,4 +35,4 @@ joined_df = pd.merge(biomass_df, df, how='inner', on=['site_code','replicate'])
 output = io.StringIO()
 output = joined_df.to_csv(encoding = "utf-8")
 blob_container_client_4 = ContainerClient(account_url=ACCOUNT_URL, container_name="04-plots-with-biomass", credential=CREDENTIAL)
-blob_container_client_4.upload_blob('forage_box_onfarm.csv', output, overwrite=True, encoding='utf-8')
+blob_container_client_4.upload_blob('forage_box_onfarm.csv', output, overwrite=True, encoding='utf-8', content_settings = ContentSettings(content_type = 'text/csv'))
