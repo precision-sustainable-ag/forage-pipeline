@@ -194,9 +194,7 @@ labeled_plots_without_outliers %>%
   purrr::imap(~{if (is.null(.x)) return(NULL) else return(.y)}) %>% 
   purrr::compact()
 
-scans[[129]] %>%
-  ggplot(aes(color = SONAR)) + 
-  geom_sf()
+
 
 
 # TODO check error, is it grouping correctly? ----
