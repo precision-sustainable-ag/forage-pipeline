@@ -7,10 +7,10 @@ library(stringr)
 
 source("secret.R")
 
-# unlink("plots_with_labels", recursive = T)
-# dir.create("plots_with_labels")
-# unlink("blobs_without_plot_labels", recursive = T)
-# dir.create("blobs_without_plot_labels")
+unlink("plots_with_labels", recursive = T)
+dir.create("plots_with_labels")
+unlink("tracks_without_labels", recursive = T)
+dir.create("tracks_without_labels")
 dir.create("diagnostic_plots")
 dir.create("tracks_with_drift")
 
@@ -28,9 +28,24 @@ make_square <- function(obj) {
   b
 }
 
-filter_uuids <- function(x, targets) {
+hex_rx <- function(...) {
+  n <- c(...)
+  hex <- "[a-fA-F0-9]"
+  glue::glue("{hex}{{{n}}}") %>% 
+    paste0(collapse = "-")
+}
+
+uuid_rx <- hex_rx(8, 4, 4, 4, 12)  
+
+
+filter_uuids <- function(x, targets, exclude = T) {
   x_uuid <- stringr::str_extract(x, uuid_rx)
-  x[!(x_uuid %in% targets)]
+  if (exclude) {
+    ret <- x[!(x_uuid %in% targets)]
+  } else {
+    ret <- x[(x_uuid %in% targets)]
+  }
+  ret
 }
 
 replace_ext <- function(fn, ext) {
@@ -51,6 +66,52 @@ mark_drift <- function(fn) {
   
   return(fn)
 }
+
+
+
+# Fetch: ----
+blob_ctr <- 
+  AzureStor::list_blob_containers(
+    sas_endpoint, 
+    sas = sas_token
+  )[["00-tracks-without-labels"]] 
+
+existing_blobs <- 
+  AzureStor::list_blobs(
+    blob_ctr, info = "name"
+  )
+
+plotted_blobs <- 
+  AzureStor::list_blobs(
+    AzureStor::list_blob_containers(
+      sas_endpoint, 
+      sas = sas_token
+    )[["01-plots-with-labels"]], 
+    info = "name"
+  ) %>% 
+  stringr::str_extract(uuid_rx) %>% 
+  unique()
+
+
+blob_geojsons <- 
+  stringr::str_subset(
+    existing_blobs,
+    glue::glue("{uuid_rx}\\.geojson")
+  ) %>% 
+  stringr::str_subset(
+    "_ce1_|_ce2_|_onfarm_|_strip_"
+  ) %>% 
+  stringr::str_subset("_S_[0-9]{8}_") %>% 
+  filter_uuids(plotted_blobs)
+
+
+AzureStor::multidownload_blob(
+  blob_ctr,
+  blob_geojsons,
+  file.path("tracks_without_labels", blob_geojsons),
+  overwrite = T
+)
+
 
 track_files <- 
   dir(
@@ -647,11 +708,251 @@ ce2_plots %>%
 
 # Strip: ----
 
-# Fetch polys
-# Fetch points
-# Join
-#   plot id: matching the point file, 0 in the plot, -1 outside any plot
-# Plot
+
+strip_tracks <- 
+  purrr::map(track_files, "result") %>% 
+  purrr::compact() %>% 
+  purrr::keep(~stringr::str_detect(.x$fn[1], "_strip_"))
+
+
+strip_uuids <- 
+  purrr::map_chr(
+    strip_tracks,
+    ~str_extract(.x$fn[1], uuid_rx)
+    )
+
+blob_ctr <- 
+  AzureStor::list_blob_containers(
+    sas_endpoint, 
+    sas = sas_token
+  )[["landing-zone"]] 
+
+existing_blobs <- 
+  AzureStor::list_blobs(
+    blob_ctr, info = "name"
+  )
+
+strip_poly_names <- 
+  existing_blobs %>% 
+  filter_uuids(strip_uuids, exclude = F) %>% 
+  str_subset("_F_[0-9]{8}_")
+
+strip_point_names <- 
+  existing_blobs %>% 
+  filter_uuids(strip_uuids, exclude = F) %>% 
+  str_subset("_O_[0-9]{8}_")
+
+AzureStor::multidownload_blob(
+  blob_ctr,
+  c(strip_poly_names, strip_point_names),
+  file.path(
+    "tracks_without_labels", 
+    "strip_locations",
+    c(strip_poly_names, strip_point_names)
+    ),
+  overwrite = T
+)
+
+recode_species <- function(s) {
+  recode(
+    s, "RWP" = "CerealRye-WinterPea", "RV" = "CerealRye-HairyVetch",
+    "RCC" = "CerealRye-CrimsonClover", "Rye" = "CerealRye",
+    "Trit" = "Triticale", "Brass Rapa" = "BRapa", "Brass R" = "BRapa", 
+    "Brass Nap" = "BNapus", "WP" = "WinterPea", "CC" = "CrimsonClover",
+    "Vetch" = "HairyVetch", "Oat" = "Oats", "Brass N" = "BNapus",
+    "BN" = "BNapus", "BR" = "BRapa", "Rap" = "BRapa"
+  )
+}
+
+
+st_extend <- function(g, n) {
+  g <- st_zm(g)
+  cr <- st_crs(g)
+  ctr = st_centroid(g)
+
+  st_set_crs((g - ctr)*n + ctr, cr)
+}
+
+
+st_furthest <- function(d = "E") {
+  function(g) {
+    crd <- st_zm(g) %>% 
+      st_coordinates() %>% 
+      as.data.frame() %>% 
+      group_by(across(c(-X, -Y))) %>% 
+      mutate(
+        flagE = X == max(X),
+        flagW = X == min(X),
+        flagN = Y == max(Y),
+        flagS = Y == min(Y)
+        ) %>% 
+      filter(if_any(matches(paste0("flag", d)))) %>% 
+      summarize(X = mean(X), Y = mean(Y), .groups = "drop")
+
+    crd %>% 
+      ungroup() %>% 
+      select(X, Y) %>% 
+      as.matrix() %>% 
+      st_multipoint() %>% 
+      st_sfc() %>% 
+      st_cast("POINT")
+  }
+}
+
+
+plot_strip <- function(obj, ply, pts, s, nm, err) {
+  ply <- ply %>% filter(Species %in% obj$Species)
+  pts <- pts %>% filter(Species %in% obj$Species)
+  
+  obj <- obj %>% 
+    mutate(
+      flag = replace(flag, Species == "mismatch", 2),
+      flag = replace(flag, flag == -1, NA)
+    )
+    
+  g <- 
+    ggplot(obj) + 
+    geom_sf(aes(color = (flag)), show.legend = F) + 
+    scale_color_viridis_c(
+      na.value = "grey70", option = "C", limits = c(0,2)
+      ) + 
+    geom_sf(data = pts, fill = NA) + 
+    geom_sf_text(data = pts, aes(label = plotID), hjust = 1.5) +
+    geom_sf(data = ply, fill = NA) +
+    geom_sf_text(
+      data = ply, 
+      aes(label = Species), 
+      fun.geometry = st_furthest("E"), 
+      hjust = 0,
+      nudge_x = 0.00025
+      ) +
+    geom_sf(
+      data = st_extend(ply$geometry, 3), 
+      fill = NA, color = NA
+      ) +
+    labs(
+      subtitle = paste(sort(s), collapse = " ") %>% str_wrap(50),
+      x = NULL, y = NULL
+      )
+  
+  if (err) {
+    nm <- file.path(getwd(), "diagnostic_plots", paste0("PLOT_ERROR_", nm))
+  } else {
+    nm <- file.path(getwd(), "preview_maps", nm)
+  }
+  
+  nm <- nm %>% replace_ext("pdf")
+  
+  ggsave(nm, plot = g, width = 10, height = 8)
+}
+
+strip_NC_F_corrected_2022_2023 <- 
+  read_sf("strip_NC_F_corrected_2022-2023.geojson") %>% 
+  st_zm()
+
+strip_extract_boundaries <- function(trk) {
+  meta <- basename(trk$fn[1]) %>% 
+    replace_ext("") %>% 
+    str_split("_", simplify = T) %>% 
+    set_names(
+      c("boxtype", "proj", "location", "rep", "species",
+        "scan", "scan_date", "uuid.")
+    )
+  
+  species <- meta[["species"]] %>% 
+    str_split("~", simplify = T)
+  
+  trk <- st_transform(trk, 4326)
+  
+  correct_poly_flag <- 
+    meta[["location"]] == "NC" & 
+    meta[["scan_date"]] >= "20221118" & 
+    meta[["scan_date"]] <= "20230503" 
+  
+  if (correct_poly_flag) {
+    poly <- strip_NC_F_corrected_2022_2023 %>% 
+      select(-Species, -Rep) %>% 
+      select(Species = Species_correct, Rep = Rep_correct, geometry)
+  } else {
+    poly <- dir(
+      "tracks_without_labels/strip_locations",
+      pattern = paste0("_F_[0-9]{8}_", meta[["uuid."]]),
+      full.names = T
+    ) %>% 
+      read_sf() %>% 
+      st_zm() %>% 
+      select(Species, geometry) %>% 
+      st_transform(4326)
+  }
+
+
+  
+  pts_buffer <- dir(
+    "tracks_without_labels/strip_locations",
+    pattern = paste0("_O_[0-9]{8}_", meta[["uuid."]]),
+    full.names = T
+  ) %>%
+    read_sf() %>%
+    st_transform(4326) %>%
+    st_zm() %>% 
+    select(matches("Species"), matches("plot", ignore.case = T), geometry) %>%
+    st_buffer(dist = units::set_units(5, "meters"))
+
+  if (!("Species" %in% names(pts_buffer))) {
+    pts_buffer <- 
+      pts_buffer %>% 
+      tidyr::separate(Plot, c("Species", "plotID"), sep = -2)
+  }
+  
+  pts_buffer <- 
+    pts_buffer %>% 
+    mutate(
+      Species = stringr::str_trim(Species),
+      Species = recode_species(Species)
+    )
+  
+  ret <- 
+    st_join(trk, poly) %>% 
+    mutate(flag_poly = if_else(is.na(Species), -1, 0)) %>% 
+    rename(Species_poly = Species) %>% 
+    st_join(pts_buffer %>% rename(Species_pt = Species)) %>% 
+    mutate(
+      flag_pt = if_else(is.na(Species_pt), 0, 1),
+      flag = flag_poly + flag_pt,
+      mismatch = Species_pt != Species_poly,
+      Species_mismatch = if_else(mismatch, "mismatch", NA_character_),
+      Species = coalesce(Species_mismatch, Species_pt, Species_poly)
+      ) %>% 
+    select(
+      -flag_poly, -flag_pt, -mismatch,
+      -Species_poly, -Species_pt, -Species_mismatch)
+
+  purrr::quietly(plot_strip)(
+    ret, poly, pts_buffer, species, 
+    basename(trk$fn[1]), F
+    )
+  
+  ret
+}
+
+strip_plots <- 
+  strip_tracks %>%  
+  set_names(map(., ~basename(.x$fn[1]))) %>% 
+  map(safely(strip_extract_boundaries), .progress = "Strip: ") 
+
+
+
+
+strip_plots %>% 
+  purrr::map("result") %>% 
+  purrr::compact()
+
+strip_plots %>% 
+  purrr::map("error") %>% 
+  purrr::compact()
+
+
+
 
 
 # Export: ----
@@ -693,6 +994,19 @@ ce2_plots %>%
     }
   )
 
+
+strip_plots %>% 
+  purrr::map("result") %>% 
+  purrr::compact() %>% 
+  purrr::map(
+    ~{
+      fn <- basename(.x$fn[1]) %>% 
+        replace_ext("geojson")
+      
+      sf::st_write(.x, file.path("plots_with_labels", fn))
+    }
+  )
+  
 ## Export ----
 
 drift_ctr <- AzureStor::list_blob_containers(
