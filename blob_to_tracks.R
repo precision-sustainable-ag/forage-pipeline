@@ -65,10 +65,10 @@ tracked_blobs <-
 blob_csvs <- 
   stringr::str_subset(
     existing_blobs,
-    glue::glue("{uuid_rx}\\.csv")
+    glue::glue("{uuid_rx}\\.(csv|txt)")
   ) %>% 
   stringr::str_subset(
-    "_ce1_|_ce2_|_onfarm_|_strip_"
+    "_ce1_|_ce2_|_onfarm_|_strip_|_WCC_"
   ) %>% 
   stringr::str_subset("_S_[0-9]{8}_") %>% 
   filter_uuids(tracked_blobs)
@@ -90,10 +90,10 @@ parse_box_from_dict <- function(fn) {
   
   if (!str_detect(lns[1], "LAT")) { stop("Missing GPS: ", fn) }
 
-  sensor_type <- str_extract(head(lns), "ASC-210|PHENOM_ACS435") %>% na.omit()
+  sensor_type <- str_extract(head(lns), "ASC-210|PHENOM_ACS435|ASC-430") %>% na.omit()
   has_voltage <- any(str_detect(head(lns), "INT_VOLT|EXT_VOLT"))
-  
-  if (sensor_type == "PHENOM_ACS435" & has_voltage) {
+
+  if (sensor_type %in% c("PHENOM_ACS435", "ASC-430") & has_voltage) {
     hdr <-
       list(
         c("LAT", "LNG", "COURSE", "SPEED", "ELEV", "HDOP", "FIX", 
@@ -130,7 +130,7 @@ parse_box_from_dict <- function(fn) {
     
     addr_pos <- 10
     
-  } else if (sensor_type == "PHENOM_ACS435" & !has_voltage) {
+  } else if (sensor_type %in% c("PHENOM_ACS435", "ASC-430") & !has_voltage) {
     hdr <- 
       list(
         c("LAT", "LNG", "COURSE", "SPEED", "ELEV", "HDOP", "FIX",
