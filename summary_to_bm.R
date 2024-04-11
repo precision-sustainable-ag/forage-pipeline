@@ -76,6 +76,8 @@ existing_summary_blobs[
     str_extract(phys_blobs, uuid_rx))
   ]
 
+
+## Strip ----
 strip_plot_summaries <- 
   list.files(
   "blobs_without_biomass",
@@ -178,6 +180,10 @@ readr::write_csv(
   )
 
 
+## WCC ----
+
+
+## Export ----
 bio_ctr <- AzureStor::list_blob_containers(
   sas_endpoint, 
   sas = sas_token
