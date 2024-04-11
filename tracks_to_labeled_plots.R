@@ -119,7 +119,7 @@ track_files <-
     full.names = T,
     pattern = "geojson"
   ) %>% 
-  purrr::map(purrr::safely(sf::read_sf))
+  purrr::map(purrr::safely(sf::read_sf), .progress = T)
 
 
 # TODO: if the file is _SE_ then override the jumps flag
