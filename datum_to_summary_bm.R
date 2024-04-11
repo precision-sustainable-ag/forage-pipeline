@@ -159,7 +159,7 @@ scan_summaries %>%
       if (is.na(fn)) { browser() }
       
       readr::write_csv(
-        .x, file.path("plots_with_summary", fn),
+        .x, file.path("plots_with_summary", replace_ext(fn, "csv")),
         append = F
       )
     }

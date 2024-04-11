@@ -36,7 +36,7 @@ existing_summary_blobs <-
   stringr::str_subset(
     glue::glue("{uuid_rx}\\.csv")
   ) %>% 
-  stringr::str_subset("_strip_") # TODO update as needed
+  stringr::str_subset("_strip_|_WCC_") # TODO update as needed
 
 AzureStor::multidownload_blob(
   blob_ctr,
@@ -45,7 +45,7 @@ AzureStor::multidownload_blob(
   overwrite = T
 )
 
-
+## Strip ----
 ## Get physical data from blob storage:
 phys_ctr <- 
   AzureStor::list_blob_containers(
@@ -73,17 +73,16 @@ AzureStor::multidownload_blob(
 # Are there any missing physical files?
 existing_summary_blobs[
   !(str_extract(existing_summary_blobs, uuid_rx) %in% 
-    str_extract(phys_blobs, uuid_rx))
-  ]
+      str_extract(phys_blobs, uuid_rx))
+]
 
 
-## Strip ----
 strip_plot_summaries <- 
   list.files(
-  "blobs_without_biomass",
-  full.names = T,
-  pattern = "_S_"
-) %>% 
+    "blobs_without_biomass",
+    full.names = T,
+    pattern = "_S_"
+  ) %>% 
   stringr::str_subset("_strip_") %>% 
   purrr::set_names(str_extract(., uuid_rx)) %>% 
   purrr::map(readr::read_csv) %>% 
@@ -99,7 +98,7 @@ strip_plot_physical <-
   purrr::set_names(str_extract(., uuid_rx)) %>% 
   purrr::map(
     ~readr::read_csv(.x, col_types = readr::cols(.default = "c"))
-    ) %>% 
+  ) %>% 
   bind_rows(.id = "uuid")
 
 
@@ -115,7 +114,7 @@ strip_all <-
     strip_plot_summaries %>% 
       filter(flag == "1"),
     by = c("uuid", "Species", "plotID")
-    ) 
+  ) 
 
 # There are many physical rows with no match, since the physical
 #   files were complete across a day, but scans are only subsets of
@@ -149,7 +148,7 @@ strip_to_push <-
     quadSize = as.numeric(quadSize),
     quadSize_m2 = as.numeric(quadSize_m2),
     quad_m2 = coalesce(quadSize_m2, quadSize)
-    ) %>%
+  ) %>%
   mutate(
     exact_quad_m2 = case_when(
       str_detect(fn, "_strip_MD_") ~ 3*(7.5*2.54/100)*(100/100),
@@ -170,18 +169,104 @@ strip_to_push <-
     Notes,
     fn,
     matches("ndvi"), matches("sonar"), matches("lidar")
-    ) 
+  ) 
 
 strip_to_push
 
 readr::write_csv(
   strip_to_push,
   "plots_with_biomass/forage_box_strip_trial.csv"
-  )
+)
 
 
 ## WCC ----
+wcc_plot_summaries <- 
+  list.files(
+    "blobs_without_biomass",
+    full.names = T,
+    pattern = "_S_"
+  ) %>% 
+  stringr::str_subset("_WCC_") %>% 
+  purrr::set_names(str_extract(., uuid_rx)) %>% 
+  purrr::map(readr::read_csv) %>% 
+  bind_rows(.id = "uuid") %>% 
+  mutate(
+    scan_date = str_extract(fn, "_[0-9]{8}_"),
+    scan_date = str_remove_all(scan_date, "_"),
+    .after = plotID
+  )
 
+wcc_biomass <- 
+  list(
+    "2019" = "1rpXS7K8Z1iSGPwl3W21IDNUz4ut-5xLr599LCRbSXhQ",
+    "2020" = "1MKNXikH0ftfggsfNZQ-zJKS8rbbvj9w3IuOc4eBozw0",
+    "2021" = "1JQ9dx5VBbl0JhKvQGGj05T7k1U6pjxozVMeuezVcTYk",
+    "2022" = "10rLeDjzDivrAmB9t1JYahrVzP7VaOTvpRXgiv1TWb5U",
+    "2023" = "12YEG8YrvegO5emxtIKRLo9Iaz5RI4Xp6eXXBk7BM0_0",
+    "2024" = "1ddRKAAr6GgGup9s3iV89jhpsUHjuZShiUpBUk6VL_hY"
+  ) %>% 
+  purrr::map(
+    ~googlesheets4::read_sheet(
+      .x, sheet = "BARC", col_types = "c",
+      .name_repair = ~make.unique(.x)
+    ) %>% 
+      select(
+        Field, plotID = Plot, matches("Species"), Latitude, Longitude, 
+        FS_box_date, Field_sampling_date, 
+        matches("Height"), matches("Dry_BM_kG_ha"), 
+        matches("Dry_Total_BM_kG_ha")
+      )
+  )
+
+wcc_biomass_combined <- 
+  wcc_biomass %>% 
+  bind_rows(.id = "harvest_year") %>% 
+  mutate(
+    Dry_BM_kG_ha = coalesce(Dry_BM_kG_ha, Dry_Total_BM_kG_ha),
+    scan_date = coalesce(
+      lubridate::mdy(FS_box_date, quiet = T), 
+      lubridate::ymd(FS_box_date, quiet = T), 
+      lubridate::mdy(Field_sampling_date, quiet = T),
+      lubridate::ymd(Field_sampling_date, quiet = T)
+    ),
+    Latitude = as.numeric(Latitude),
+    Longitude = as.numeric(Longitude)
+  ) %>% 
+  tidyr::unite(
+    col = "Species", 
+    matches("Species"), 
+    sep = "-",
+    na.rm = T
+  ) %>% 
+  filter(!is.na(plotID)) %>% 
+  select(
+    harvest_year, Field, plotID, Species, scan_date, 
+    Latitude, Longitude, 
+    Dry_BM_kG_ha, matches("Height")
+  ) 
+
+
+wcc_to_push <- 
+  left_join(
+    wcc_plot_summaries %>% 
+      mutate(
+        plotID = as.character(plotID),
+        scan_date = lubridate::as_date(scan_date)
+      ),
+    wcc_biomass_combined
+  ) %>% 
+  filter(!is.na(plotID))
+
+wcc_to_push %>% 
+  filter(is.na(Dry_BM_kG_ha)) %>% 
+  View()
+
+
+readr::write_csv(
+  wcc_to_push %>% 
+    filter(!is.na(Dry_BM_kG_ha)),
+  "plots_with_biomass/forage_box_wcc.csv"
+)
 
 ## Export ----
 bio_ctr <- AzureStor::list_blob_containers(

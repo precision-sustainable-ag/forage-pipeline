@@ -974,7 +974,7 @@ wcc_flag_ids <-
       .name_repair = ~make.unique(.x)
     ) %>% 
       select(
-        Field, Plot, Species, Latitude, Longitude, 
+        Field, Plot, matches("Species"), Latitude, Longitude, 
         FS_box_date, Field_sampling_date
       )
   )
@@ -992,6 +992,12 @@ wcc_flag_ids_combined <-
     Latitude = as.numeric(Latitude),
     Longitude = as.numeric(Longitude)
   ) %>% 
+  tidyr::unite(
+    col = "Species", 
+    matches("Species"), 
+    sep = "-",
+    na.rm = T
+    ) %>% 
   filter(!is.na(Plot)) %>% 
   filter(!is.na(Latitude), !is.na(Longitude)) %>% 
   select(harvest_year, Field, Plot, Species, Latitude, Longitude, date) %>% 
