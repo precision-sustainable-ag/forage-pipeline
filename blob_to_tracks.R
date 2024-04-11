@@ -83,7 +83,7 @@ AzureStor::multidownload_blob(
 
 # Extract plot locations: ----
 parse_box_from_dict <- function(fn) {
-  lns <- readr::read_lines(fn)
+  lns <- readr::read_lines(fn, progress = F)
   lns <- lns[str_detect(lns, ",")]
   
   if (!length(lns)) { stop("Empty scanfile: ", fn) }
@@ -193,10 +193,11 @@ parse_box_from_dict <- function(fn) {
 
 scans <- file.path(
   "blobs_without_plot_labels",
-  blob_csvs
+  blob_csvs[23]
 ) %>% 
   purrr::map(
-    ~purrr::safely(parse_box_from_dict)(.x)
+    ~purrr::safely(parse_box_from_dict)(.x),
+    .progress = T
   )
 
 purrr::map(scans, "error") %>% query_errors()

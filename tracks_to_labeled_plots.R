@@ -99,7 +99,7 @@ blob_geojsons <-
     glue::glue("{uuid_rx}\\.geojson")
   ) %>% 
   stringr::str_subset(
-    "_ce1_|_ce2_|_onfarm_|_strip_"
+    "_ce1_|_ce2_|_onfarm_|_strip_|_WCC_"
   ) %>% 
   stringr::str_subset("_S_[0-9]{8}_") %>% 
   filter_uuids(plotted_blobs)
@@ -118,7 +118,7 @@ track_files <-
     "tracks_without_labels",
     full.names = T,
     pattern = "geojson"
-    ) %>% 
+  ) %>% 
   purrr::map(purrr::safely(sf::read_sf))
 
 
@@ -254,12 +254,12 @@ label_looped_scan <- function(lps, buffer_size) {
       labeled_loops, 
       lps[["track"]][jumps > units::set_units(2.5, "m") & !is.na(jumps), ]
     )
-
+    
     # move the file
     mark_drift(
       basename(labeled_loops$fn[1]) %>% 
         replace_ext("geojson")
-      )
+    )
     stop(
       "GPS drifting?\n",
       "See file:\n",
@@ -621,7 +621,7 @@ extract_ce_plots <- function(dat, n_plots) {
     mark_drift(
       basename(dat$fn[1]) %>% 
         replace_ext("geojson")
-      )
+    )
     stop(
       "GPS drifting?\n",
       "See file:\n",
@@ -719,7 +719,7 @@ strip_uuids <-
   purrr::map_chr(
     strip_tracks,
     ~str_extract(.x$fn[1], uuid_rx)
-    )
+  )
 
 blob_ctr <- 
   AzureStor::list_blob_containers(
@@ -749,7 +749,7 @@ AzureStor::multidownload_blob(
     "tracks_without_labels", 
     "strip_locations",
     c(strip_poly_names, strip_point_names)
-    ),
+  ),
   overwrite = T
 )
 
@@ -769,7 +769,7 @@ st_extend <- function(g, n) {
   g <- st_zm(g)
   cr <- st_crs(g)
   ctr = st_centroid(g)
-
+  
   st_set_crs((g - ctr)*n + ctr, cr)
 }
 
@@ -785,10 +785,10 @@ st_furthest <- function(d = "E") {
         flagW = X == min(X),
         flagN = Y == max(Y),
         flagS = Y == min(Y)
-        ) %>% 
+      ) %>% 
       filter(if_any(matches(paste0("flag", d)))) %>% 
       summarize(X = mean(X), Y = mean(Y), .groups = "drop")
-
+    
     crd %>% 
       ungroup() %>% 
       select(X, Y) %>% 
@@ -809,13 +809,13 @@ plot_strip <- function(obj, ply, pts, s, nm, err) {
       flag = replace(flag, Species == "mismatch", 2),
       flag = replace(flag, flag == -1, NA)
     )
-    
+  
   g <- 
     ggplot(obj) + 
     geom_sf(aes(color = (flag)), show.legend = F) + 
     scale_color_viridis_c(
       na.value = "grey70", option = "C", limits = c(0,2)
-      ) + 
+    ) + 
     geom_sf(data = pts, fill = NA) + 
     geom_sf_text(data = pts, aes(label = plotID), hjust = 1.5) +
     geom_sf(data = ply, fill = NA) +
@@ -825,15 +825,15 @@ plot_strip <- function(obj, ply, pts, s, nm, err) {
       fun.geometry = st_furthest("E"), 
       hjust = 0,
       nudge_x = 0.00025
-      ) +
+    ) +
     geom_sf(
       data = st_extend(ply$geometry, 3), 
       fill = NA, color = NA
-      ) +
+    ) +
     labs(
       subtitle = paste(sort(s), collapse = " ") %>% str_wrap(50),
       x = NULL, y = NULL
-      )
+    )
   
   if (err) {
     nm <- file.path(getwd(), "diagnostic_plots", paste0("PLOT_ERROR_", nm))
@@ -884,8 +884,8 @@ strip_extract_boundaries <- function(trk) {
       select(Species, geometry) %>% 
       st_transform(4326)
   }
-
-
+  
+  
   
   pts_buffer <- dir(
     "tracks_without_labels/strip_locations",
@@ -897,7 +897,7 @@ strip_extract_boundaries <- function(trk) {
     st_zm() %>% 
     select(matches("Species"), matches("plot", ignore.case = T), geometry) %>%
     st_buffer(dist = units::set_units(5, "meters"))
-
+  
   if (!("Species" %in% names(pts_buffer))) {
     pts_buffer <- 
       pts_buffer %>% 
@@ -922,15 +922,15 @@ strip_extract_boundaries <- function(trk) {
       mismatch = Species_pt != Species_poly,
       Species_mismatch = if_else(mismatch, "mismatch", NA_character_),
       Species = coalesce(Species_mismatch, Species_pt, Species_poly)
-      ) %>% 
+    ) %>% 
     select(
       -flag_poly, -flag_pt, -mismatch,
       -Species_poly, -Species_pt, -Species_mismatch)
-
+  
   purrr::quietly(plot_strip)(
     ret, poly, pts_buffer, species, 
     basename(trk$fn[1]), F
-    )
+  )
   
   ret
 }
@@ -953,6 +953,219 @@ strip_plots %>%
 
 
 
+# WCC: ----
+wcc_tracks <- 
+  purrr::map(track_files, "result") %>% 
+  purrr::compact() %>% 
+  purrr::keep(~stringr::str_detect(.x$fn[1], "_WCC_"))
+
+wcc_flag_ids <- 
+  list(
+    "2019" = "1rpXS7K8Z1iSGPwl3W21IDNUz4ut-5xLr599LCRbSXhQ",
+    "2020" = "1MKNXikH0ftfggsfNZQ-zJKS8rbbvj9w3IuOc4eBozw0",
+    "2021" = "1JQ9dx5VBbl0JhKvQGGj05T7k1U6pjxozVMeuezVcTYk",
+    "2022" = "10rLeDjzDivrAmB9t1JYahrVzP7VaOTvpRXgiv1TWb5U",
+    "2023" = "12YEG8YrvegO5emxtIKRLo9Iaz5RI4Xp6eXXBk7BM0_0",
+    "2024" = "1ddRKAAr6GgGup9s3iV89jhpsUHjuZShiUpBUk6VL_hY"
+  ) %>% 
+  purrr::map(
+    ~googlesheets4::read_sheet(
+      .x, sheet = "BARC", col_types = "c",
+      .name_repair = ~make.unique(.x)
+    ) %>% 
+      select(
+        Field, Plot, Species, Latitude, Longitude, 
+        FS_box_date, Field_sampling_date
+      )
+  )
+
+wcc_flag_ids_combined <- 
+  wcc_flag_ids %>% 
+  bind_rows(.id = "harvest_year") %>% 
+  mutate(
+    date = coalesce(
+      lubridate::mdy(FS_box_date, quiet = T), 
+      lubridate::ymd(FS_box_date, quiet = T), 
+      lubridate::mdy(Field_sampling_date, quiet = T),
+      lubridate::ymd(Field_sampling_date, quiet = T)
+    ),
+    Latitude = as.numeric(Latitude),
+    Longitude = as.numeric(Longitude)
+  ) %>% 
+  filter(!is.na(Plot)) %>% 
+  filter(!is.na(Latitude), !is.na(Longitude)) %>% 
+  select(harvest_year, Field, Plot, Species, Latitude, Longitude, date) %>% 
+  st_as_sf(
+    coords = c("Longitude", "Latitude"), 
+    crs = 4326
+  )
+
+# are there any misentries with the date?
+wcc_flag_ids_combined %>% 
+  filter(is.na(date))
+
+get_harvest_year <- function(d) {
+  if (lubridate::month(d) > 6) {
+    lubridate::year(d) + 1
+  } else { lubridate::year(d) }
+}
+
+plot_wcc <- function(lbl_trk, locs, nm) {
+  b <- make_square(lbl_trk) %>% st_as_sfc()
+  
+  locs_ <- 
+    locs %>% 
+    filter(Plot %in% lbl_trk$Plot) %>% 
+    st_buffer(10)
+  
+  p1 <- ggplot() +
+    geom_sf(data = b, fill = "#00000000", color = "#00000000") +
+    geom_sf(data = locs_) +
+    geom_sf(
+      data = lbl_trk %>% filter(is.na(Plot)), 
+      aes(color = NDVI)
+    ) +
+    geom_sf(
+      data = lbl_trk %>% filter(!is.na(Plot)), 
+      aes(fill = as.factor(Plot)),
+      shape = 21, color = "#00000000"
+    ) +
+    scale_color_viridis_c() +
+    labs(fill = NULL)
+  
+  p2 <- ggplot(
+    lbl_trk %>% mutate(obs = row_number()), 
+    aes(obs, SONAR)
+  ) +
+    geom_point(
+      aes(color = as.factor(Plot)), 
+      show.legend = F,
+      alpha = 0.75
+    )
+  
+  path = if (stringr::str_detect(nm, "Error")) {
+    file.path("diagnostic_plots", nm) %>% 
+      replace_ext("pdf")
+  } else {
+    file.path("preview_maps", replace_ext(nm, "pdf"))
+  }
+  
+  ggsave(
+    path,
+    plot = p1 + p2 + plot_annotation(title = nm), 
+    width = 12, height = 5
+  )
+}
+
+wcc_mark_flags <- function(trk) {
+  meta <- basename(trk$fn[1]) %>% 
+    replace_ext("") %>% 
+    str_split("_", simplify = T) %>% 
+    set_names(
+      c("boxtype", "proj", "location", "field", 
+        "species", "scan", "scan_date", "uuid.")
+    )
+  scan_date = lubridate::ymd(meta[["scan_date"]])
+  hy = get_harvest_year(scan_date)
+  middle = round(nrow(trk)/2)
+  box_dm = str_sub(trk$UTC_DATE[middle], 1, 4)
+  box_y = str_sub(trk$UTC_DATE[middle], 5, 6)
+  box_date_fixed = 
+    paste0(box_dm, "20", box_y) %>% 
+    lubridate::dmy()
+  
+  if (scan_date != box_date_fixed) {
+    stop("Filename date does not match box date: ", trk$fn[1])
+  }
+  
+  flag_locs <- 
+    wcc_flag_ids_combined %>% 
+    filter(harvest_year == hy) %>% 
+    filter(date >= scan_date - 7, date <= scan_date + 7) %>% 
+    filter(date == date[which.min(abs(date - scan_date))])
+  
+  if (length(unique(flag_locs$date)) != 1) {
+    stop(
+      "No field sampling dates found within 1 week of scan date: ", 
+      basename(trk$fn[1])
+    )
+  }
+  
+  ret <- st_join(
+    trk,
+    st_buffer(flag_locs, 10)
+  ) %>% 
+    select(-harvest_year)
+  
+  ret_inner <- st_filter(
+    trk,
+    st_buffer(flag_locs, 20)
+  )
+  
+  meta_count <- 
+    ret %>% 
+    distinct(Species, Field) %>% 
+    filter(!is.na(Species)) %>% 
+    nrow()
+  
+  if (meta_count != 1) {
+    stop(
+      "Multiple/no fields matched within scan track: ", 
+      basename(trk$fn[1])
+    )
+  }
+  
+  ret$Field <- unique(na.omit(ret$Field))
+  ret$Species <- unique(na.omit(ret$Species))
+  ret$date <- unique(na.omit(ret$date))
+  
+  sonar_stuck_num <- 
+    ret_inner %>% 
+    filter(SONAR != 999, NDVI != 999) %>% 
+    mutate(rng = RcppRoll::roll_max(SONAR, n = 100, fill = NA) - RcppRoll::roll_min(SONAR, n = 100, fill = NA)) %>% 
+    filter(!is.na(rng), rng < 2) %>% 
+    nrow()
+
+  sonar_non999_frac <-
+    with(
+      ret_inner,
+      table(SONAR == 999)[["FALSE"]]/length(SONAR)
+    )
+  
+  err_msg <- ""
+  if(sonar_stuck_num > 0) { 
+    err_msg = "SONAR Range Error "
+  } else if (sonar_non999_frac < 0.7) {
+    err_msg = "SONAR 999 Error "
+  }
+  
+  plot_wcc(
+    ret, flag_locs, 
+    paste0(err_msg, basename(trk$fn[1]))
+  )
+  
+  if (err_msg != "") {
+    stop("SONAR either stuck or 999: ", basename(trk$fn[1]))
+  }
+  
+  ret %>% 
+    mutate(
+      flag = coalesce(Plot, "0")
+    ) %>% 
+    rename(plotID = Plot)
+}
+
+
+wcc_labeled_tracks <- 
+  purrr::map(
+    wcc_tracks,
+    purrr::safely(wcc_mark_flags),
+    .progress = T
+  )
+
+wcc_labeled_tracks %>% 
+  purrr::map("error") %>% 
+  query_errors()
 
 
 # Export: ----
@@ -1006,7 +1219,20 @@ strip_plots %>%
       sf::st_write(.x, file.path("plots_with_labels", fn))
     }
   )
-  
+
+
+wcc_labeled_tracks %>% 
+  purrr::map("result") %>% 
+  purrr::compact() %>% 
+  purrr::map(
+    ~{
+      fn <- basename(.x$fn[1]) %>% 
+        replace_ext("geojson")
+      
+      sf::st_write(.x, file.path("plots_with_labels", fn))
+    }
+  )
+
 ## Export ----
 
 drift_ctr <- AzureStor::list_blob_containers(
