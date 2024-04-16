@@ -83,6 +83,7 @@ summarise_plot <- function(trk) {
   trk <- trk %>% 
     group_by(
       flag, 
+      across(matches("Field")),
       across(matches("Species")), 
       across(matches("Rep")),
       across(matches("plotID"))
@@ -129,7 +130,7 @@ datum_sf <- dir(
   pattern = "geojson$",
   full.names = T
 ) %>% 
-  purrr::map(read_sf)
+  purrr::map(read_sf, .progress = T)
 
 
 
@@ -137,7 +138,8 @@ scan_summaries <-
   datum_sf %>% 
   purrr::map(
     ~st_drop_geometry(.x) %>% 
-      purrr::safely(summarise_plot)()
+      purrr::safely(summarise_plot)(),
+    .progress = T
   )
 
 purrr::map(scan_summaries, "error") %>% 
@@ -157,7 +159,7 @@ scan_summaries %>%
       if (is.na(fn)) { browser() }
       
       readr::write_csv(
-        .x, file.path("plots_with_summary", fn),
+        .x, file.path("plots_with_summary", replace_ext(fn, "csv")),
         append = F
       )
     }

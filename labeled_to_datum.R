@@ -85,7 +85,7 @@ scans <- dir(
   pattern = "geojson"
 ) %>% 
   purrr::map(
-    ~sf::st_read(.x),
+    ~sf::st_read(.x)
   )
 
 # labeled blob to datum ----
