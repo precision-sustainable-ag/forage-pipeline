@@ -23,10 +23,7 @@ existing_datum_blobs <-
     blob_ctr, info = "name"
   )
 
-# TODO:
-# there are duplicated packages for WCC, 
-#   looks like 20211220, 20211109 maybe?
-# need to hash all the scan files and make sure they're dupes and pick one
+
 
 
 
