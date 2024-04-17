@@ -150,6 +150,10 @@ parse_box_from_dict <- function(fn) {
     stop("Unknown sensor type: ", fn)
   }
 
+  if (str_detect(fn, "box214v1_")) {
+    hdr[[2]] <- str_subset(hdr[[2]], "^ISP[12]$", negate = T)
+  }
+  
   lns <- lns[str_detect(lns, "^[-+0-9]")]
 
   trailing_flag <- 
