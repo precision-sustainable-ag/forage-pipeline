@@ -70,6 +70,9 @@ blob_csvs <-
   stringr::str_subset(
     "_ce1_|_ce2_|_onfarm_|_strip_|_WCC_"
   ) %>% 
+  stringr::str_subset(
+    "^box211", negate = T
+  ) %>% 
   stringr::str_subset("_S_[0-9]{8}_") %>% 
   filter_uuids(tracked_blobs)
 
@@ -147,6 +150,10 @@ parse_box_from_dict <- function(fn) {
     stop("Unknown sensor type: ", fn)
   }
 
+  if (str_detect(fn, "box214v1_")) {
+    hdr[[2]] <- str_subset(hdr[[2]], "^ISP[12]$", negate = T)
+  }
+  
   lns <- lns[str_detect(lns, "^[-+0-9]")]
 
   trailing_flag <- 
@@ -193,7 +200,7 @@ parse_box_from_dict <- function(fn) {
 
 scans <- file.path(
   "blobs_without_plot_labels",
-  blob_csvs[23]
+  blob_csvs
 ) %>% 
   purrr::map(
     ~purrr::safely(parse_box_from_dict)(.x),
@@ -202,6 +209,8 @@ scans <- file.path(
 
 purrr::map(scans, "error") %>% query_errors()
 
+# TODO: manually edit, has mixed trailing commas and not
+#   "box214v2_WCC_BARC_232A_Triticale_S_20230322_3213691f-0883-4e40-a0cc-4d7e831d75a2.csv"
 
 tracks_to_save <- 
   purrr::map(scans, "result") %>% 
