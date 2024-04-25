@@ -278,6 +278,7 @@ bio_ctr <- AzureStor::list_blob_containers(
 )[["04-plots-with-biomass"]] 
 
 
+# TODO: fix not uploading when blob exists
 biomass_plots_pushed <- 
   dir(
     "plots_with_biomass",
