@@ -969,7 +969,9 @@ wcc_flag_ids <-
     "2024" = "1ddRKAAr6GgGup9s3iV89jhpsUHjuZShiUpBUk6VL_hY"
   ) %>% 
   purrr::map(
-    ~googlesheets4::read_sheet(
+    ~{
+      Sys.sleep(1)
+      googlesheets4::read_sheet(
       .x, sheet = "BARC", col_types = "c",
       .name_repair = ~make.unique(.x)
     ) %>% 
@@ -977,6 +979,7 @@ wcc_flag_ids <-
         Field, Plot, matches("Species"), Latitude, Longitude, 
         FS_box_date, Field_sampling_date
       )
+    }
   )
 
 wcc_flag_ids_combined <- 
@@ -1128,8 +1131,11 @@ wcc_mark_flags <- function(trk) {
   sonar_stuck_num <- 
     ret_inner %>% 
     filter(SONAR != 999, NDVI != 999) %>% 
-    mutate(rng = RcppRoll::roll_max(SONAR, n = 100, fill = NA) - RcppRoll::roll_min(SONAR, n = 100, fill = NA)) %>% 
-    filter(!is.na(rng), rng < 2) %>% 
+    mutate(
+      rng = RcppRoll::roll_max(SONAR, n = 100, fill = NA) - 
+        RcppRoll::roll_min(SONAR, n = 100, fill = NA)
+      ) %>% 
+    filter(!is.na(rng), rng < 1.5) %>% 
     nrow()
 
   sonar_non999_frac <-

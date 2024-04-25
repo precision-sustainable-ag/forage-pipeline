@@ -238,7 +238,8 @@ tracks_to_save %>%
         "tracks_without_labels",
         basename(.x$fn[1]) %>% 
           replace_ext("geojson")
-      )
+      ),
+      quiet = T
     )
   )
 

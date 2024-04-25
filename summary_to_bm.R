@@ -206,7 +206,9 @@ wcc_biomass <-
     "2024" = "1ddRKAAr6GgGup9s3iV89jhpsUHjuZShiUpBUk6VL_hY"
   ) %>% 
   purrr::map(
-    ~googlesheets4::read_sheet(
+    ~{
+      Sys.sleep(1)
+      googlesheets4::read_sheet(
       .x, sheet = "BARC", col_types = "c",
       .name_repair = ~make.unique(.x)
     ) %>% 
@@ -216,6 +218,7 @@ wcc_biomass <-
         matches("Height"), matches("Dry_BM_kG_ha"), 
         matches("Dry_Total_BM_kG_ha")
       )
+    }
   )
 
 wcc_biomass_combined <- 
@@ -275,6 +278,7 @@ bio_ctr <- AzureStor::list_blob_containers(
 )[["04-plots-with-biomass"]] 
 
 
+# TODO: fix not uploading when blob exists
 biomass_plots_pushed <- 
   dir(
     "plots_with_biomass",
