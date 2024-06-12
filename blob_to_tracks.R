@@ -68,7 +68,7 @@ blob_csvs <-
     glue::glue("{uuid_rx}\\.(csv|txt)")
   ) %>% 
   stringr::str_subset(
-    "_ce1_|_ce2_|_onfarm_|_strip_|_WCC_"
+    "_ce1_|_ce2_|_onfarm_|_strip_|_WCC_|_FFAR_"
   ) %>% 
   stringr::str_subset(
     "^box211", negate = T
@@ -200,7 +200,7 @@ parse_box_from_dict <- function(fn) {
 
 scans <- file.path(
   "blobs_without_plot_labels",
-  blob_csvs
+  blob_csvs[1:10]
 ) %>% 
   purrr::map(
     ~purrr::safely(parse_box_from_dict)(.x),
